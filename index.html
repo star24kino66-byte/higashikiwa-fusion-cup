@@ -2962,10 +2962,20 @@ function buildCheerCol(trackId,list){
   // まず1セット分だけ入れて実幅を測る
   list.forEach(c=>track.appendChild(_makeCheerCard(c)));
   const oneSetWidth=track.scrollWidth||0;
+  if(oneSetWidth===0){
+    // レイアウト未確定などで測定に失敗した場合は、複製処理を進めず1フレーム待って再試行する
+    requestAnimationFrame(()=>{
+      track.innerHTML='';
+      buildCheerCol(trackId,list);
+    });
+    return;
+  }
   // 画面幅の2倍以上になるまでセットを複製（最低2セット）。短い投稿数でも末尾に空白が出ないようにする
+  // ※oneSetWidthの測定値が極端に小さい（レイアウト未確定時の測定など）場合でも
+  //   カード生成が暴走してブラウザが重くならないよう、上限（20セット）を設けている
   const wrap=track.closest('.cheer-row-wrap');
   const viewport=(wrap&&wrap.clientWidth)?wrap.clientWidth:400;
-  const needed=Math.max(2, Math.ceil((viewport*2)/Math.max(oneSetWidth,1))+1);
+  const needed=Math.min(20, Math.max(2, Math.ceil((viewport*2)/Math.max(oneSetWidth,1))+1));
   let copies=1;
   while(copies<needed){
     list.forEach(c=>track.appendChild(_makeCheerCard(c)));
