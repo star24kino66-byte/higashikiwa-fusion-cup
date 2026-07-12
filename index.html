@@ -5181,8 +5181,8 @@ function renderAlbumAdmin(){
 
   try{
     sb.channel('realtime-all')
-      .on('postgres_changes',{event:'*',schema:'public',table:'messages'}, _scheduleMessagesSync)
-      .on('postgres_changes',{event:'*',schema:'public',table:'photos'}, _schedulePhotosSync)
+      .on('postgres_changes',{event:'*',schema:'public',table:'messages'}, (payload)=>{ console.log('[RT-DEBUG] messages event received:', payload); _scheduleMessagesSync(payload); })
+      .on('postgres_changes',{event:'*',schema:'public',table:'photos'}, (payload)=>{ console.log('[RT-DEBUG] photos event received:', payload); _schedulePhotosSync(payload); })
       .on('postgres_changes',{event:'*',schema:'public',table:'donors'}, _scheduleDonorsSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'games'}, _scheduleGamesSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'tournament_blocks'}, _scheduleBlocksSync)
