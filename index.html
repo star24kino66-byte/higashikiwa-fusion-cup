@@ -2196,24 +2196,6 @@ async function loadBlocksFromSupabase(){
   populateBlockSelect();
 }
 
-const DEFAULT_PLAYERS=[
-  {num:'10',grade:'6年生',name:'田中 翔太',pos:'投手',dream:'プロ野球選手',captain:'主将'},
-  {num:'1',grade:'6年生',name:'山本 蓮',pos:'捕手',dream:'監督',captain:''},
-  {num:'2',grade:'6年生',name:'佐藤 颯',pos:'一塁手',dream:'医者',captain:''},
-  {num:'3',grade:'6年生',name:'鈴木 陸斗',pos:'二塁手',dream:'野球選手',captain:''},
-  {num:'4',grade:'5年生',name:'高橋 悠人',pos:'遊撃手',dream:'警察官',captain:''},
-  {num:'5',grade:'5年生',name:'渡辺 大和',pos:'三塁手',dream:'プロ野球選手',captain:''},
-  {num:'6',grade:'5年生',name:'中村 結斗',pos:'外野手',dream:'サッカー選手',captain:''},
-  {num:'7',grade:'5年生',name:'小林 陽向',pos:'外野手',dream:'消防士',captain:''},
-  {num:'8',grade:'4年生',name:'加藤 玲央',pos:'外野手',dream:'野球選手',captain:''},
-  {num:'9',grade:'4年生',name:'吉田 大翔',pos:'投手',dream:'医者',captain:''},
-  {num:'11',grade:'4年生',name:'松本 駿',pos:'内野手',dream:'教師',captain:''},
-  {num:'12',grade:'3年生',name:'伊藤 蒼',pos:'内野手',dream:'プロ野球選手',captain:''},
-  {num:'13',grade:'3年生',name:'清水 光',pos:'捕手',dream:'野球選手',captain:''},
-  {num:'14',grade:'3年生',name:'木村 空',pos:'外野手',dream:'パイロット',captain:''},
-  {num:'15',grade:'3年生',name:'林 虎太郎',pos:'内野手',dream:'プロ野球選手',captain:''},
-];
-
 /* =========================================================
    サイト名・チーム名・開催日・開催地（Supabase settings テーブル key: 'site_name' で全端末共有）
    他クラブへの横展開を見据え、直書きせず設定値として一元管理する
@@ -2649,10 +2631,10 @@ function getOppTeamsList(){
 function findTeamByName(name){
   return TEAMS_ROSTER.find(t=>t.name===name);
 }
-// 表示用のフォールバック（teams_roster未設定時）：DEFAULT_PLAYERSを自チーム1件として扱う
+// 表示用のフォールバック（teams_roster未設定時）：チーム名は実際の設定値を使い、選手名簿は空（ダミー選手名は表示しない）
 function getDisplayTeams(){
   if(TEAMS_ROSTER.length>0) return TEAMS_ROSTER;
-  return [{name:SITE_TEAM_NAME,manager:'',coaches:'',isHost:true,roster:DEFAULT_PLAYERS}];
+  return [{name:SITE_TEAM_NAME,manager:'',coaches:'',isHost:true,roster:[]}];
 }
 async function saveTeamsRoster(teams){
   const {error}=await sb.from('settings').upsert({key:'teams_roster',value:JSON.stringify(teams)},{onConflict:'key'});
@@ -5860,6 +5842,10 @@ function renderTeamPlayerCards(teamName){
   if(!grid) return;
   grid.innerHTML='';
   const roster=team.roster||[];
+  if(roster.length===0){
+    grid.innerHTML='<div style="font-size:12px;color:#aaa;text-align:center;padding:1rem 0;">選手名簿は準備中です</div>';
+    return;
+  }
   roster.forEach((p,i)=>{
     const isRed=i%3===1;
     const card=document.createElement('div');
