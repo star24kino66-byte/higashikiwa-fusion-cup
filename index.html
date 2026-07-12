@@ -1777,6 +1777,14 @@ img{
       </div>
 
       <div class="admin-form-card">
+        <div class="admin-form-title">🏆 写真投稿カテゴリ（賞名）の設定</div>
+        <p style="font-size:12px;color:#666;margin-bottom:.6rem;">写真投稿フォームやフォトベスト9で表示される賞のアイコン・名前です。件数（6個）と並び順は固定ですが、他クラブで利用する際はここで大会に合わせて変更してください。</p>
+        <div id="catAdminList"></div>
+        <button class="ubtn" onclick="saveCatSettings()">保存する</button>
+        <div id="catAdminStatus" style="font-size:12px;color:#666;margin-top:.4rem;"></div>
+      </div>
+
+      <div class="admin-form-card">
         <div class="admin-form-title">🎨 サイト全体のテーマ（見た目）</div>
         <p style="font-size:12px;color:#666;margin-bottom:.6rem;">ここで選んだテーマが、端末で個別に選び直していない全ての来場者に表示されます（保存すると即座に全端末へ反映）。来場者は画面の🎨ボタンから自分の端末だけ好きなテーマに変更できます。</p>
         <div class="fr">
@@ -2552,6 +2560,52 @@ async function uploadSiteLogo(){
     if(statusEl) statusEl.textContent='❌ アップロードに失敗しました：'+e.message;
   }
 }
+// 管理画面：写真投稿カテゴリ（賞名・アイコン）編集フォームの描画
+function renderCatAdminForm(){
+  const list=document.getElementById('catAdminList');
+  if(!list) return;
+  list.innerHTML=CATS.map(([key,label,icon])=>`
+    <div class="fr" data-catkey="${esc(key)}">
+      <input type="text" class="cat-admin-icon" value="${esc(icon)}" maxlength="4" style="width:56px;flex:none;text-align:center;">
+      <input type="text" class="cat-admin-label" value="${esc(label)}" maxlength="12" style="flex:1;">
+    </div>
+  `).join('');
+}
+// 管理画面：写真投稿カテゴリ（賞名・アイコン）の保存
+async function saveCatSettings(){
+  const statusEl=document.getElementById('catAdminStatus');
+  const rows=document.querySelectorAll('#catAdminList [data-catkey]');
+  const newCats=[];
+  let hasEmpty=false;
+  rows.forEach(row=>{
+    const key=row.getAttribute('data-catkey');
+    const iconInput=row.querySelector('.cat-admin-icon');
+    const labelInput=row.querySelector('.cat-admin-label');
+    const icon=(iconInput.value||'').trim();
+    const label=(labelInput.value||'').trim();
+    if(!label) hasEmpty=true;
+    newCats.push([key,label,icon||'🏆']);
+  });
+  if(hasEmpty){ if(statusEl) statusEl.textContent='❌ 賞名は空欄にできません'; return; }
+  try{
+    const {error}=await sb.from('settings').upsert({key:'photo_categories',value:JSON.stringify(newCats)},{onConflict:'key'});
+    if(error){ if(statusEl) statusEl.textContent='❌ 保存に失敗しました：'+error.message; return; }
+    newCats.forEach(([key,label,icon])=>{
+      const entry=CATS.find(c=>c[0]===key);
+      if(entry){ entry[1]=label; entry[2]=icon; }
+    });
+    rebuildCatMaps();
+    initPhotoPublicUI();
+    rp(ct);
+    renderBest9Grid();
+    renderBestNineAdmin();
+    renderApprovedPhotoList();
+    renderPendingPhotoList();
+    if(statusEl){ statusEl.textContent='✅ カテゴリを更新しました。'; setTimeout(()=>{statusEl.textContent='';},3000); }
+  }catch(e){
+    if(statusEl) statusEl.textContent='❌ 保存に失敗しました：'+e.message;
+  }
+}
 // 管理画面：サイト名・チーム名・開催日・開催地・ヒーロー一言の更新ボタン
 async function updateSiteName(){
   const teamName=(document.getElementById('siteNameTeamInput').value||'').trim();
@@ -2928,7 +2982,7 @@ buildCheerCol('cheerRowA',cA);
 buildCheerCol('cheerRowB',cB);
 buildCheerCol('cheerRowC',cC);
 
-const CATS=[
+let CATS=[
   ['fiftieth','50周年記念賞','🏆'],
   ['cute','ベストショット賞','📸'],
   ['team','チームワーク賞','🤝'],
@@ -2938,8 +2992,12 @@ const CATS=[
 ];
 // いいねランキング上位3枠（自動）は LIKE_SLOTS で管理
 const LIKE_SLOTS=3;
-const catLabel=Object.fromEntries(CATS.map(([k,l])=>[k,l]));
-const catIcon=Object.fromEntries(CATS.map(([k,l,ic])=>[k,ic]));
+let catLabel={},catIcon={};
+function rebuildCatMaps(){
+  catLabel=Object.fromEntries(CATS.map(([k,l])=>[k,l]));
+  catIcon=Object.fromEntries(CATS.map(([k,l,ic])=>[k,ic]));
+}
+rebuildCatMaps();
 
 // PHOTOS
 let currentModalType=null;
@@ -5417,9 +5475,26 @@ async function loadSettingsFromSupabase(){
     if(row.key==='site_theme' && row.value){
       SITE_THEME=row.value;
     }
+    if(row.key==='photo_categories'){
+      try{
+        const saved=JSON.parse(row.value);
+        if(Array.isArray(saved)){
+          saved.forEach(([key,label,icon])=>{
+            const entry=CATS.find(c=>c[0]===key);
+            if(entry){
+              if(label) entry[1]=label;
+              if(icon) entry[2]=icon;
+            }
+          });
+          rebuildCatMaps();
+        }
+      }catch(e){ console.error('photo_categories読み込みエラー:',e); }
+    }
   });
   applySiteName();
   applyLogo();
+  renderCatAdminForm();
+  initPhotoPublicUI();
   buildThemePicker();
   if(!getLocalThemeOverride()) applyThemeToDOM(SITE_THEME);
   refreshThemeUI();
