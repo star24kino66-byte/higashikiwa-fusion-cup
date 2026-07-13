@@ -3106,8 +3106,9 @@ function renderBest9Grid(){
   awardCards.forEach(({catKey,catName,catIco,photo,isDummy})=>{
     const card=document.createElement('div');
     card.className='best9-pub-card'+(isDummy?'':' has-photo');
-    const imgHtml=(photo.thumb&&(photo.thumb.startsWith('data:')||photo.thumb.startsWith('http')))
-      ?`<img src="${photo.thumb}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.src)">`
+    const photoThumbSrc=(photo.thumbSmall&&(photo.thumbSmall.startsWith('data:')||photo.thumbSmall.startsWith('http')))?photo.thumbSmall:photo.thumb;
+    const imgHtml=(photoThumbSrc&&(photoThumbSrc.startsWith('data:')||photoThumbSrc.startsWith('http')))
+      ?`<img src="${photoThumbSrc}" data-full="${photo.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)">`
       :`<div class="best9-pub-emoji">${photo.e||'📷'}</div>`;
     // 賞名が長い場合（例：ベストショット賞）はバッジのフォントを一段小さくして1行に収める
     const badgeLongCls=(catName&&catName.length>=7)?' badge-long':'';
@@ -3134,8 +3135,9 @@ function renderBest9Grid(){
     const isDummy=!p._id;
     const card=document.createElement('div');
     card.className='best9-pub-card best9-like-card'+(isDummy?'':' has-photo');
-    const imgHtml=(p.thumb&&(p.thumb.startsWith('data:')||p.thumb.startsWith('http')))
-      ?`<img src="${p.thumb}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.src)">`
+    const pThumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb;
+    const imgHtml=(pThumbSrc&&(pThumbSrc.startsWith('data:')||pThumbSrc.startsWith('http')))
+      ?`<img src="${pThumbSrc}" data-full="${p.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)">`
       :`<div class="best9-pub-emoji">${thumbHtml(p.e||'📷','60px')}</div>`;
     card.innerHTML=`
       <div class="best9-pub-badge like-badge">${likeMedals[i]} ${i+1}位</div>
@@ -3637,8 +3639,9 @@ function renderPhotoModalList(keepPage){
     const teamStr=p.team?`<div class="photo-modal-card-team">チーム：${esc(p.team)}</div>`:'';
     const authorStr=p.author?`<div class="photo-modal-card-author">投稿者：${esc(p.author)}</div>`:'';
     const bestBadge=p.isBest?`<div class="best-badge">🏆 ${esc(catLabel[p.cat]||p.cat)} 受賞</div>`:'';
-    const imgHtml=(p.e&&(p.e.startsWith('data:')||p.e.startsWith('http')))
-      ?`<img src="${p.e}" class="photo-modal-card-img clickable-photo" onclick="openLightbox(this.src)">`
+    const modalThumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.e;
+    const imgHtml=(modalThumbSrc&&(modalThumbSrc.startsWith('data:')||modalThumbSrc.startsWith('http')))
+      ?`<img src="${modalThumbSrc}" data-full="${p.thumb||p.e||''}" class="photo-modal-card-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)">`
       :`<div class="photo-modal-card-emoji">${p.e||'📷'}</div>`;
     html+=`<div class="photo-modal-card${p.isBest?' is-best':''}">
       ${bestBadge}
@@ -3761,6 +3764,7 @@ function mergeApprovedPhotos(){
       PH[p.cat].push({
         e:p.thumb||'📷',
         thumb:p.thumb||null,
+        thumbSmall:p.thumbSmall||null,
         n:p.n,
         author:p.author,
         team:p.team,
