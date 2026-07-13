@@ -5435,16 +5435,20 @@ function renderAlbumAdmin(){
 
   try{
     sb.channel('realtime-all')
-      .on('postgres_changes',{event:'*',schema:'public',table:'messages'}, _scheduleMessagesSync)
-      .on('postgres_changes',{event:'*',schema:'public',table:'photos'}, _schedulePhotosSync)
+      .on('postgres_changes',{event:'*',schema:'public',table:'messages'}, payload=>{
+        _scheduleMessagesSync();
+        if(payload.eventType==='INSERT') notifyOnInsert('応援メッセージ','💬')();
+        if(payload.eventType==='UPDATE') notifyOnApprove('💬 応援メッセージが')(payload);
+      })
+      .on('postgres_changes',{event:'*',schema:'public',table:'photos'}, payload=>{
+        _schedulePhotosSync();
+        if(payload.eventType==='INSERT') notifyOnInsert('写真','📷')();
+        if(payload.eventType==='UPDATE') notifyOnApprove('📷 写真が')(payload);
+      })
       .on('postgres_changes',{event:'*',schema:'public',table:'donors'}, _scheduleDonorsSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'games'}, _scheduleGamesSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'tournament_blocks'}, _scheduleBlocksSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'settings'}, _scheduleSettingsSync)
-      .on('postgres_changes',{event:'INSERT',schema:'public',table:'photos'}, notifyOnInsert('写真','📷'))
-      .on('postgres_changes',{event:'UPDATE',schema:'public',table:'photos'}, notifyOnApprove('📷 写真が'))
-      .on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'}, notifyOnInsert('応援メッセージ','💬'))
-      .on('postgres_changes',{event:'UPDATE',schema:'public',table:'messages'}, notifyOnApprove('💬 応援メッセージが'))
       .subscribe(status=>{
         _realtimeOk=(status==='SUBSCRIBED');
         console.log('Realtime:',status);
