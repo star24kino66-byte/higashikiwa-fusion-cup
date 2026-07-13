@@ -4217,14 +4217,30 @@ function renderBulkRosterPreview(roster){
     row.style.cssText='display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #eee;font-size:12px;';
     const thumb=document.createElement('img');
     thumb.style.cssText='width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;background:#eee;';
-    const reader=new FileReader();
-    reader.onload=e=>{ thumb.src=e.target.result; };
-    reader.readAsDataURL(m.file);
+    thumb.dataset.rowThumb=idx;
+    refreshBulkRosterThumb(thumb,m);
     const nameSpan=document.createElement('div');
     nameSpan.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#888;';
-    nameSpan.textContent=m.file.name;
+    nameSpan.textContent=m.file.name+(m.customBlob?'（調整済み）':'');
+    nameSpan.dataset.rowLabel=idx;
+    const cropBtn=document.createElement('button');
+    cropBtn.type='button';
+    cropBtn.textContent='✂️';
+    cropBtn.title='この写真を切り取る';
+    cropBtn.style.cssText='flex-shrink:0;border:1px solid #ddd;background:#fff;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:13px;';
+    cropBtn.onclick=async()=>{
+      const targetId=_bulkRosterMapping[idx].playerId;
+      if(!targetId){ alert('先に選手（またはチーム全体）を選んでから切り取ってください'); return; }
+      try{
+        const aspectRatio=targetId==='_team_'?4/3:1;
+        const blob=await openCropModal(_bulkRosterMapping[idx].file,aspectRatio);
+        _bulkRosterMapping[idx].customBlob=blob;
+        refreshBulkRosterThumb(thumb,_bulkRosterMapping[idx]);
+        nameSpan.textContent=_bulkRosterMapping[idx].file.name+'（調整済み）';
+      }catch(e){ /* キャンセル時は何もしない */ }
+    };
     const sel=document.createElement('select');
-    sel.style.cssText='font-size:12px;padding:4px;border:1px solid #ddd;border-radius:6px;max-width:45%;';
+    sel.style.cssText='font-size:12px;padding:4px;border:1px solid #ddd;border-radius:6px;max-width:38%;';
     const skipOpt=document.createElement('option'); skipOpt.value=''; skipOpt.textContent='（スキップ）';
     sel.appendChild(skipOpt);
     const teamOpt=document.createElement('option'); teamOpt.value='_team_'; teamOpt.textContent='チーム全体（集合写真）';
@@ -4235,14 +4251,30 @@ function renderBulkRosterPreview(roster){
       sel.appendChild(opt);
     });
     sel.value=m.playerId||'';
-    sel.onchange=()=>{ _bulkRosterMapping[idx].playerId=sel.value||null; };
-    row.appendChild(thumb); row.appendChild(nameSpan); row.appendChild(sel);
+    sel.onchange=()=>{
+      const newVal=sel.value||null;
+      const oldIsTeam=_bulkRosterMapping[idx].playerId==='_team_';
+      const newIsTeam=newVal==='_team_';
+      if(_bulkRosterMapping[idx].customBlob && oldIsTeam!==newIsTeam){
+        _bulkRosterMapping[idx].customBlob=null; // 縦横比が変わるので調整済みクロップを破棄
+        refreshBulkRosterThumb(thumb,_bulkRosterMapping[idx]);
+        nameSpan.textContent=_bulkRosterMapping[idx].file.name;
+      }
+      _bulkRosterMapping[idx].playerId=newVal;
+    };
+    row.appendChild(thumb); row.appendChild(nameSpan); row.appendChild(cropBtn); row.appendChild(sel);
     area.appendChild(row);
   });
   const btn=document.getElementById('bulkRosterConfirmBtn');
   if(btn){ btn.disabled=false; btn.style.opacity='1'; }
   const statusEl=document.getElementById('bulkRosterStatus');
-  if(statusEl) statusEl.textContent=`${_bulkRosterMapping.length}枚のプレビューを作成しました。割り当てを確認してから登録してください。`;
+  if(statusEl) statusEl.textContent=`${_bulkRosterMapping.length}枚のプレビューを作成しました。自動で割り当てが不安な場合はプルダウンで選手を変更、切り抜き位置を直したい場合は✂️ボタンで調整してください。`;
+}
+// プレビューのサムネイルを描画（切り取り調整済みならそちらを優先表示）
+function refreshBulkRosterThumb(imgEl,m){
+  const reader=new FileReader();
+  reader.onload=e=>{ imgEl.src=e.target.result; };
+  reader.readAsDataURL(m.customBlob||m.file);
 }
 // 画像をcanvasで正方形に中央クロップ＋リサイズ（一括登録用：1枚ずつのクロップ操作を省略するための自動処理）
 function resizeImageFileSquare(file,size,quality){
@@ -4282,7 +4314,7 @@ async function confirmBulkRosterUpload(){
     done++;
     if(statusEl) statusEl.textContent=`アップロード中… (${done}/${targets.length})`;
     try{
-      const blob=await resizeImageFileSquare(m.file,800,0.85);
+      const blob=m.customBlob||await resizeImageFileSquare(m.file,800,0.85);
       const filePath='roster/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
       const {error:upErr}=await sb.storage.from('photos').upload(filePath,blob,{contentType:'image/jpeg',upsert:false});
       if(upErr){ failed++; continue; }
