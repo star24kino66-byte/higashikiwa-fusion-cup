@@ -1750,6 +1750,28 @@ img{
         <button class="ubtn" onclick="uploadRosterPhoto()">アップロードする</button>
         <div id="rosterPhotoStatus" style="font-size:12px;color:#666;margin-top:.6rem;"></div>
       </div>
+
+      <div class="admin-form-card">
+        <div class="admin-form-title">③ 写真の一括登録（複数選手まとめて）</div>
+        <p style="font-size:12px;color:#666;line-height:1.6;margin-bottom:.6rem;">
+          大人数分の写真を一度に登録できます。ファイル名の先頭を背番号にしておく（例：「10_田中.jpg」）と自動で選手に割り当てます。番号が読み取れないファイルは名簿の順番で仮に割り当てるので、登録前のプレビューで必ず確認・修正してください。1枚あたり自動で正方形に切り抜き＆圧縮されます。
+        </p>
+        <div class="fr">
+          <select id="bulkRosterPhotoTeam" onchange="bulkRosterClearPreview()" style="width:100%;font-size:14px;padding:8px;border:1px solid #ddd;border-radius:8px;">
+            <option value="">① チームを選んでください</option>
+          </select>
+        </div>
+        <div class="fr">
+          <label for="bulkRosterPhotoFiles" style="display:flex;align-items:center;gap:8px;background:#f5f6fa;border:1px solid #ddd;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px;color:#555;width:100%;box-sizing:border-box;">
+            <span style="font-size:16px;">🖼</span>
+            <span id="bulkRosterPhotoFileName">② 写真ファイルをまとめて選択する（複数選択可）</span>
+          </label>
+          <input type="file" id="bulkRosterPhotoFiles" accept="image/*" multiple style="display:none;" onchange="buildBulkRosterPreview(this.files)">
+        </div>
+        <div id="bulkRosterPreviewArea" style="display:none;margin:.8rem 0;max-height:360px;overflow-y:auto;border:1px solid #eee;border-radius:8px;"></div>
+        <button class="ubtn" id="bulkRosterConfirmBtn" onclick="confirmBulkRosterUpload()" disabled style="opacity:.5;">③ この内容で一括登録する</button>
+        <div id="bulkRosterStatus" style="font-size:12px;color:#666;margin-top:.6rem;white-space:pre-line;"></div>
+      </div>
     </div>
 
     <!-- 大会設定（サイト名・ロゴ・大会設定CSV） -->
@@ -2526,10 +2548,12 @@ async function uploadSiteLogo(){
     if(upErr){ if(statusEl) statusEl.textContent='❌ アップロードに失敗しました：'+upErr.message; return; }
     const {data:urlData}=sb.storage.from('photos').getPublicUrl(filePath);
     const url=urlData.publicUrl;
+    const oldLogoUrl=LOGO_URL;
     const {error:dbErr}=await sb.from('settings').upsert({key:'logo_url',value:url},{onConflict:'key'});
     if(dbErr){ if(statusEl) statusEl.textContent='❌ 設定の保存に失敗しました：'+dbErr.message; return; }
     LOGO_URL=url;
     applyLogo();
+    if(oldLogoUrl) deleteStorageFileByUrl(oldLogoUrl); // 差し替え前の旧ロゴファイルを削除
     if(statusEl){
       statusEl.textContent='✅ ロゴを更新しました。全端末に反映されます。';
       setTimeout(()=>{statusEl.textContent='';},4000);
@@ -3464,6 +3488,7 @@ async function deleteMyPost(id){
     if(entry.type==='cheer'){
       await loadCheersFromSupabase(); mergeApproved(); rebuildCheerRows();
     } else {
+      deletePhotoStorageFiles([id]); // 本体・サムネイルファイルも削除
       await loadPhotosFromSupabase(); mergeApproved(); rp();
     }
     renderMyPostsModal();
@@ -4090,15 +4115,19 @@ async function uploadRosterPhoto(){
     const teams=TEAMS_ROSTER.length>0?TEAMS_ROSTER:getDisplayTeams();
     const team=teams.find(t=>normalizeForMatch(t.name)===normalizeForMatch(teamName));
     if(!team){ statusEl.textContent='❌ チームが見つかりません'; return; }
+    let oldPhotoUrl=null;
     if(!playerName||playerName==='_team_'){
+      oldPhotoUrl=team.teamPhotoUrl;
       team.teamPhotoUrl=url;
     } else {
       const player=(team.roster||[]).find(p=>normalizeForMatch(p.name)===normalizeForMatch(playerName));
       if(!player){ statusEl.textContent='❌ 選手が見つかりません'; return; }
+      oldPhotoUrl=player.photoUrl;
       player.photoUrl=url;
     }
     await saveTeamsRoster(teams);
     renderAllTeamViews();
+    if(oldPhotoUrl) deleteStorageFileByUrl(oldPhotoUrl); // 差し替え前の旧写真ファイルを削除
     statusEl.textContent='✅ 写真を登録しました。';
     setTimeout(()=>{statusEl.textContent='';},3000);
     _pendingRosterPhotoBlob=null;
@@ -4107,6 +4136,181 @@ async function uploadRosterPhoto(){
   }catch(e){
     statusEl.textContent='❌ アップロードに失敗しました：'+e.message;
   }
+}
+
+function initBulkRosterPhotoTeamList(){
+  const teamSel=document.getElementById('bulkRosterPhotoTeam');
+  if(!teamSel) return;
+  const prev=teamSel.value;
+  teamSel.innerHTML='<option value="">① チームを選んでください</option>';
+  const teams=getDisplayTeams();
+  teams.filter(t=>t.isHost).forEach(t=>{
+    const opt=document.createElement('option');
+    opt.value=t.name; opt.textContent=t.name+'（主催チーム）';
+    teamSel.appendChild(opt);
+  });
+  teams.filter(t=>!t.isHost).forEach(t=>{
+    const opt=document.createElement('option');
+    opt.value=t.name; opt.textContent=t.name;
+    teamSel.appendChild(opt);
+  });
+  if(prev && teams.some(t=>t.name===prev)) teamSel.value=prev;
+}
+let _bulkRosterMapping=[]; // [{file, playerId:('_team_'|選手id|null), label}]
+function bulkRosterClearPreview(){
+  _bulkRosterMapping=[];
+  const area=document.getElementById('bulkRosterPreviewArea');
+  if(area){ area.style.display='none'; area.innerHTML=''; }
+  const btn=document.getElementById('bulkRosterConfirmBtn');
+  if(btn){ btn.disabled=true; btn.style.opacity='.5'; }
+  const fileInput=document.getElementById('bulkRosterPhotoFiles');
+  if(fileInput) fileInput.value='';
+  const nameEl=document.getElementById('bulkRosterPhotoFileName');
+  if(nameEl) nameEl.textContent='② 写真ファイルをまとめて選択する（複数選択可）';
+  const statusEl=document.getElementById('bulkRosterStatus');
+  if(statusEl) statusEl.textContent='';
+}
+function buildBulkRosterPreview(fileList){
+  const teamSel=document.getElementById('bulkRosterPhotoTeam');
+  const teamName=teamSel?teamSel.value:'';
+  const statusEl=document.getElementById('bulkRosterStatus');
+  const fileInput=document.getElementById('bulkRosterPhotoFiles');
+  if(!teamName){ if(statusEl) statusEl.textContent='❌ 先にチームを選んでください'; if(fileInput) fileInput.value=''; return; }
+  const files=[...fileList];
+  if(files.length===0) return;
+  const nameEl=document.getElementById('bulkRosterPhotoFileName');
+  if(nameEl) nameEl.textContent=`${files.length}枚選択中`;
+  const teams=TEAMS_ROSTER.length>0?TEAMS_ROSTER:getDisplayTeams();
+  const team=teams.find(t=>normalizeForMatch(t.name)===normalizeForMatch(teamName));
+  if(!team){ if(statusEl) statusEl.textContent='❌ チームが見つかりません'; return; }
+  const roster=team.roster||[];
+  // ①ファイル名先頭の背番号で一致するものを優先マッチ ②残りは名簿順で未割当の選手に仮割当
+  const usedPlayerIds=new Set();
+  const mapping=[];
+  const unmatchedFiles=[];
+  files.forEach(file=>{
+    const m=file.name.match(/^(\d+)/);
+    let matched=null;
+    if(m){
+      const num=m[1];
+      matched=roster.find(p=>String(p.num)===num && !usedPlayerIds.has(p.id));
+    }
+    if(matched){ usedPlayerIds.add(matched.id); mapping.push({file,playerId:matched.id,label:(matched.num?matched.num+'番 ':'')+matched.name}); }
+    else{ unmatchedFiles.push(file); }
+  });
+  const remainingPlayers=roster.filter(p=>!usedPlayerIds.has(p.id));
+  unmatchedFiles.forEach((file,idx)=>{
+    const p=remainingPlayers[idx];
+    if(p){ usedPlayerIds.add(p.id); mapping.push({file,playerId:p.id,label:(p.num?p.num+'番 ':'')+p.name+'（自動割当・要確認）'}); }
+    else{ mapping.push({file,playerId:null,label:'（対象選手なし・スキップ）'}); }
+  });
+  _bulkRosterMapping=mapping;
+  renderBulkRosterPreview(roster);
+}
+function renderBulkRosterPreview(roster){
+  const area=document.getElementById('bulkRosterPreviewArea');
+  if(!area) return;
+  area.style.display='block';
+  area.innerHTML='';
+  _bulkRosterMapping.forEach((m,idx)=>{
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #eee;font-size:12px;';
+    const thumb=document.createElement('img');
+    thumb.style.cssText='width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;background:#eee;';
+    const reader=new FileReader();
+    reader.onload=e=>{ thumb.src=e.target.result; };
+    reader.readAsDataURL(m.file);
+    const nameSpan=document.createElement('div');
+    nameSpan.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#888;';
+    nameSpan.textContent=m.file.name;
+    const sel=document.createElement('select');
+    sel.style.cssText='font-size:12px;padding:4px;border:1px solid #ddd;border-radius:6px;max-width:45%;';
+    const skipOpt=document.createElement('option'); skipOpt.value=''; skipOpt.textContent='（スキップ）';
+    sel.appendChild(skipOpt);
+    const teamOpt=document.createElement('option'); teamOpt.value='_team_'; teamOpt.textContent='チーム全体（集合写真）';
+    sel.appendChild(teamOpt);
+    roster.forEach(p=>{
+      const opt=document.createElement('option');
+      opt.value=p.id; opt.textContent=(p.num?p.num+'番 ':'')+p.name;
+      sel.appendChild(opt);
+    });
+    sel.value=m.playerId||'';
+    sel.onchange=()=>{ _bulkRosterMapping[idx].playerId=sel.value||null; };
+    row.appendChild(thumb); row.appendChild(nameSpan); row.appendChild(sel);
+    area.appendChild(row);
+  });
+  const btn=document.getElementById('bulkRosterConfirmBtn');
+  if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+  const statusEl=document.getElementById('bulkRosterStatus');
+  if(statusEl) statusEl.textContent=`${_bulkRosterMapping.length}枚のプレビューを作成しました。割り当てを確認してから登録してください。`;
+}
+// 画像をcanvasで正方形に中央クロップ＋リサイズ（一括登録用：1枚ずつのクロップ操作を省略するための自動処理）
+function resizeImageFileSquare(file,size,quality){
+  size=size||800; quality=quality||0.85;
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      const side=Math.min(img.naturalWidth,img.naturalHeight);
+      const sx=(img.naturalWidth-side)/2, sy=(img.naturalHeight-side)/2;
+      const canvas=document.createElement('canvas');
+      canvas.width=size; canvas.height=size;
+      const c=canvas.getContext('2d');
+      c.drawImage(img,sx,sy,side,side,0,0,size,size);
+      canvas.toBlob(blob=>{ blob?resolve(blob):reject(new Error('画像の変換に失敗しました')); },'image/jpeg',quality);
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error('画像の読み込みに失敗しました')); };
+    img.src=url;
+  });
+}
+async function confirmBulkRosterUpload(){
+  const teamSel=document.getElementById('bulkRosterPhotoTeam');
+  const teamName=teamSel?teamSel.value:'';
+  const statusEl=document.getElementById('bulkRosterStatus');
+  const btn=document.getElementById('bulkRosterConfirmBtn');
+  const targets=_bulkRosterMapping.filter(m=>m.playerId);
+  if(targets.length===0){ if(statusEl) statusEl.textContent='❌ 登録対象がありません（すべてスキップに設定されています）'; return; }
+  if(!confirm(`${targets.length}枚を登録します。よろしいですか？`)) return;
+  if(btn){ btn.disabled=true; btn.style.opacity='.5'; }
+  const teams=TEAMS_ROSTER.length>0?TEAMS_ROSTER:getDisplayTeams();
+  const team=teams.find(t=>normalizeForMatch(t.name)===normalizeForMatch(teamName));
+  if(!team){ if(statusEl) statusEl.textContent='❌ チームが見つかりません'; return; }
+  const oldUrls=[];
+  let done=0, failed=0;
+  for(const m of targets){
+    done++;
+    if(statusEl) statusEl.textContent=`アップロード中… (${done}/${targets.length})`;
+    try{
+      const blob=await resizeImageFileSquare(m.file,800,0.85);
+      const filePath='roster/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
+      const {error:upErr}=await sb.storage.from('photos').upload(filePath,blob,{contentType:'image/jpeg',upsert:false});
+      if(upErr){ failed++; continue; }
+      const {data:urlData}=sb.storage.from('photos').getPublicUrl(filePath);
+      const url=urlData.publicUrl;
+      if(m.playerId==='_team_'){
+        if(team.teamPhotoUrl) oldUrls.push(team.teamPhotoUrl);
+        team.teamPhotoUrl=url;
+      }else{
+        const player=(team.roster||[]).find(p=>p.id===m.playerId);
+        if(!player){ failed++; continue; }
+        if(player.photoUrl) oldUrls.push(player.photoUrl);
+        player.photoUrl=url;
+      }
+    }catch(e){ failed++; console.error('一括登録エラー:',e); }
+  }
+  if(statusEl) statusEl.textContent='名簿を保存中…';
+  try{
+    await saveTeamsRoster(teams);
+    renderAllTeamViews();
+  }catch(e){
+    if(statusEl) statusEl.textContent='❌ 名簿の保存に失敗しました：'+e.message;
+    if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+    return;
+  }
+  oldUrls.forEach(u=>deleteStorageFileByUrl(u)); // 差し替え前の旧ファイルを削除
+  if(statusEl) statusEl.textContent=`✅ ${done-failed}枚を登録しました。${failed>0?failed+'枚は失敗しました。':''}`;
+  bulkRosterClearPreview();
 }
 
 async function submitCheer(){
@@ -4682,6 +4886,22 @@ async function deletePhotoStorageFiles(ids){
     if(error) console.warn('Storage孤児ファイル削除エラー（投稿自体は削除済み）:',error.message);
   } catch(e){ console.warn('Storage孤児ファイル削除で例外（投稿自体は削除済み）:',e); }
 }
+// 公開URL（https://xxx.supabase.co/storage/v1/object/public/photos/xxx）から
+// バケット内パスを逆算して削除する共通ヘルパー。
+// ロゴ・選手名簿写真の「差し替え」など、旧ファイルをピンポイントで消したい場面で使う。
+// 失敗しても投稿・保存自体には影響させない（孤児ファイルが1つ残るだけなので握りつぶす）。
+async function deleteStorageFileByUrl(url){
+  if(!url) return;
+  try{
+    const marker='/storage/v1/object/public/photos/';
+    const idx=url.indexOf(marker);
+    if(idx===-1) return;
+    const path=decodeURIComponent(url.slice(idx+marker.length));
+    if(!path) return;
+    const {error}=await sb.storage.from('photos').remove([path]);
+    if(error) console.warn('旧ストレージファイル削除エラー（実害なし）:',error.message);
+  }catch(e){ console.warn('旧ストレージファイル削除で例外（実害なし）:',e); }
+}
 
 async function approvePhoto(id){
   try{
@@ -5018,8 +5238,10 @@ async function addAlbumPhoto(){
 async function deleteAlbumPhoto(id){
   if(!confirm('この写真を削除します。よろしいですか？')) return;
   try{
+    const target=ALBUM_PHOTOS.find(p=>p.id===id);
     const {error}=await sb.from('album').delete().eq('id',id);
     if(error){ alert('削除に失敗しました：'+error.message); return; }
+    if(target&&target.image_url) deleteStorageFileByUrl(target.image_url); // 本体ファイルも削除
     albumIdx=0;
     await loadAlbumFromSupabase();
   } catch(e){ alert('削除に失敗しました。もう一度お試しください。'); console.error(e); }
@@ -5181,8 +5403,8 @@ function renderAlbumAdmin(){
 
   try{
     sb.channel('realtime-all')
-      .on('postgres_changes',{event:'*',schema:'public',table:'messages'}, (payload)=>{ console.log('[RT-DEBUG] messages event received:', payload); _scheduleMessagesSync(payload); })
-      .on('postgres_changes',{event:'*',schema:'public',table:'photos'}, (payload)=>{ console.log('[RT-DEBUG] photos event received:', payload); _schedulePhotosSync(payload); })
+      .on('postgres_changes',{event:'*',schema:'public',table:'messages'}, _scheduleMessagesSync)
+      .on('postgres_changes',{event:'*',schema:'public',table:'photos'}, _schedulePhotosSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'donors'}, _scheduleDonorsSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'games'}, _scheduleGamesSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'tournament_blocks'}, _scheduleBlocksSync)
@@ -5772,6 +5994,7 @@ function renderAllTeamViews(){
   initCheerTeamList();
   initPhotoTeamList();
   initRosterPhotoTeamList();
+  initBulkRosterPhotoTeamList();
   initPlTeamTabs();
 }
 
@@ -5827,7 +6050,7 @@ function renderTeamPlayerCards(teamName){
   const teamPhotoEl=document.getElementById('plOppPhoto');
   if(teamPhotoEl){
     if(team.teamPhotoUrl){
-      teamPhotoEl.innerHTML=`<img src="${esc(team.teamPhotoUrl)}" alt="${esc(team.name)} 集合写真" style="width:100%;display:block;border-radius:8px;">`;
+      teamPhotoEl.innerHTML=`<img src="${esc(team.teamPhotoUrl)}" alt="${esc(team.name)} 集合写真" style="width:100%;display:block;border-radius:8px;" loading="lazy" decoding="async">`;
     } else {
       teamPhotoEl.innerHTML='';
     }
@@ -5865,7 +6088,7 @@ function renderTeamPlayerCards(teamName){
       <div class="top">
         <div class="number">${esc(p.num)||'?'}</div>
         ${p.grade?`<div class="top-grade">${esc(p.grade)}</div>`:''}
-        <img class="photo" src="${p.photoUrl?esc(p.photoUrl):PLACEHOLDER_IMG}" alt="${esc(p.name)}">
+        <img class="photo" src="${p.photoUrl?esc(p.photoUrl):PLACEHOLDER_IMG}" alt="${esc(p.name)}" loading="lazy" decoding="async">
       </div>
       <div class="body">
         <div class="name">${esc(p.name)}${p.captain?`<span class="captain-badge">${esc(p.captain)}</span>`:''}</div>
