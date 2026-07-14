@@ -15,6 +15,32 @@
 const SUPABASE_URL = 'https://xohjlirseoyuklehqrmx.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_0dcx37bRhzPywFX59OBERA_E6UMWVp5';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// 管理者ログイン用メールアドレス（Supabase Authのユーザー作成時と同じものを設定）
+const ADMIN_EMAIL = 'higashikiwa50th-staff@example.com';
+
+/* ---------- エラーログ自動収集（商品改良・サポート対応用） ---------- */
+function logErrorToSupabase(message, stack, source){
+  try{
+    sb.from('error_logs').insert({
+      message: String(message||'').slice(0,500),
+      stack: String(stack||'').slice(0,2000),
+      url: location.href,
+      user_agent: navigator.userAgent,
+      source: source||'error'
+    }).then(()=>{}).catch(()=>{});
+  }catch(e){ /* ログ送信自体の失敗は無視（サイト動作に影響させない） */ }
+}
+window.addEventListener('error', function(e){
+  logErrorToSupabase(e.message, e.error && e.error.stack, 'window.onerror');
+});
+window.addEventListener('unhandledrejection', function(e){
+  const reason=e.reason;
+  logErrorToSupabase(
+    reason && reason.message ? reason.message : String(reason),
+    reason && reason.stack,
+    'unhandledrejection'
+  );
+});
 
 // 機能ON/OFFスイッチ（クライアント（大会）ごとにこのファイル内で切り替える）
 // donation: 寄付金・協賛管理機能（ナビタブ・ページ・ダッシュボード表示・管理画面・募集バナーを一括制御）
@@ -1467,15 +1493,17 @@ img{
     <div class="admin-header">
       <div class="admin-title">📋 管理者画面</div>
       <span id="realtimeBadge" style="font-size:11px;margin-left:8px;font-weight:bold;">🟡 通信不安定：10秒ごとに自動更新中</span>
+      <button class="admin-close" onclick="adminLogout()" style="margin-right:6px;">🔓 ログアウト</button>
       <button class="admin-close" onclick="closeAdminPanel()">← トップへ戻る</button>
     </div>
     <div class="admin-tabs">
       <div class="admin-tab-group"><span class="admin-tab-group-label">📷 フォトベスト9</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'pendingPhotos')">未承認写真 <span class="pending-count" id="photoCount">0</span></button><button class="admin-tab" onclick="switchAdminTab(this,'approvedPhotos')">承認済写真</button><button class="admin-tab" onclick="switchAdminTab(this,'bestNineAdmin')" style="grid-column:span 2;">🏆 ベスト9選定</button></div></div>
       <div class="admin-tab-group"><span class="admin-tab-group-label">💬 応援メッセージ</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'pendingCheers')">未承認メッセージ <span class="pending-count" id="cheerCount">0</span></button><button class="admin-tab" onclick="switchAdminTab(this,'approvedCheers')">承認済メッセージ</button></div></div>
       <div class="admin-tab-group"><span class="admin-tab-group-label">⚾ 試合管理</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'gameAdmin')">⚾ 試合結果入力</button><button class="admin-tab" onclick="switchAdminTab(this,'tournamentAdmin')">🏆 トーナメント・リーグ戦設定</button></div></div>
-      <div class="admin-tab-group"><span class="admin-tab-group-label">👥 選手・大会情報</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'csvAdmin')">👥 選手登録</button><button class="admin-tab" onclick="switchAdminTab(this,'infoAdmin')">⚙️ 大会設定</button></div></div>
+      <div class="admin-tab-group"><span class="admin-tab-group-label">👥 選手・大会情報</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'csvAdmin')">👥 選手登録</button><button class="admin-tab" onclick="switchAdminTab(this,'infoAdmin')">⚙️ 大会設定</button><button class="admin-tab" onclick="switchAdminTab(this,'teamLinkAdmin')">🔗 チーム入力リンク</button><button class="admin-tab" onclick="switchAdminTab(this,'rosterPendingAdmin')">📋 名簿承認待ち <span class="pending-count" id="rosterPendingCount">0</span></button></div></div>
       <div class="admin-tab-group" id="donationAdminTabGroup"><span class="admin-tab-group-label">💰 寄付金・協賛</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'donationAdmin')">💰 寄付金管理</button><button class="admin-tab" onclick="switchAdminTab(this,'albumAdmin')">🖼 活動アルバム</button></div></div>
       <div class="admin-tab-group"><span class="admin-tab-group-label">⚙️ サイト設定</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'periodAdmin')" style="grid-column:span 2;">⏰ 期間設定</button></div></div>
+      <div class="admin-tab-group"><span class="admin-tab-group-label">🐛 サポート</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'errorLogAdmin')" style="grid-column:span 2;">🐛 エラーログ</button></div></div>
     </div>
     <div class="admin-modal-backdrop" id="adminModalBackdrop" onclick="closeAdminModal()"></div>
     <div class="admin-section" id="pendingPhotos"><div id="pendingPhotoList"></div></div>
@@ -1706,6 +1734,22 @@ img{
       </div>
     </div>
 
+    <!-- エラーログ -->
+    <div class="admin-section" id="errorLogAdmin">
+      <div class="admin-form-card">
+        <div class="admin-form-title">🐛 エラーログ（直近100件）</div>
+        <div style="font-size:11px;color:#888;margin-bottom:.7rem;line-height:1.6;background:#f8f9fb;border-radius:6px;padding:.5rem .7rem;">
+          来場者のブラウザで発生したエラーを自動記録しています。個人情報は含まれません（エラー内容・発生ページ・ブラウザ情報のみ）。
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:.7rem;">
+          <button class="ubtn" style="flex:1;" onclick="loadErrorLogs()">🔄 更新</button>
+          <button class="ubtn" style="flex:1;background:#c00;" onclick="clearErrorLogs()">🗑 全件削除</button>
+        </div>
+        <div id="errorLogStatus" style="font-size:12px;color:#666;margin-bottom:.5rem;"></div>
+        <div id="errorLogList" style="max-height:60vh;overflow-y:auto;"></div>
+      </div>
+    </div>
+
     <!-- 選手CSV（自チーム＋対戦チーム 統合） -->
     <div class="admin-section" id="csvAdmin">
       <div class="admin-form-card">
@@ -1772,6 +1816,46 @@ img{
         <button class="ubtn" id="bulkRosterConfirmBtn" onclick="confirmBulkRosterUpload()" disabled style="opacity:.5;">③ この内容で一括登録する</button>
         <div id="bulkRosterStatus" style="font-size:12px;color:#666;margin-top:.6rem;white-space:pre-line;"></div>
       </div>
+    </div>
+
+    <!-- チーム専用 選手名簿入力リンク管理 -->
+    <div class="admin-section" id="teamLinkAdmin">
+      <div class="admin-form-card">
+        <div class="admin-form-title">① チームを追加してリンクを発行</div>
+        <p style="font-size:12px;color:#666;line-height:1.6;margin-bottom:.6rem;">
+          チーム名を入力すると、そのチーム専用の入力リンクを発行できます。発行したリンクをチームの担当者にLINEやメールで送ると、パスワード不要で選手名簿を入力してもらえます（提出後は管理者の承認待ちになります）。<br>
+          すでにExcelで登録済みのチームにも、あとからリンクを発行して内容を編集してもらうことができます。
+        </p>
+        <div class="fr">
+          <input type="text" id="newTeamLinkName" placeholder="チーム名を入力" style="flex:1;font-size:14px;padding:8px;border:1px solid #ddd;border-radius:8px;">
+        </div>
+        <div class="fr" style="align-items:center;">
+          <label style="font-size:12px;color:#555;display:flex;align-items:center;gap:4px;"><input type="radio" name="newTeamLinkHost" value="opp" checked> 対戦チーム</label>
+          <label style="font-size:12px;color:#555;display:flex;align-items:center;gap:4px;"><input type="radio" name="newTeamLinkHost" value="host"> 自チーム</label>
+        </div>
+        <button class="ubtn" onclick="addNewTeamWithLink()">＋ チームを追加してリンクを発行する</button>
+        <div id="newTeamLinkStatus" style="font-size:12px;color:#666;margin-top:.6rem;"></div>
+      </div>
+      <div class="admin-form-card">
+        <div class="admin-form-title">② チーム一覧・入力リンク</div>
+        <p style="font-size:12px;color:#666;line-height:1.6;margin-bottom:.6rem;">
+          リンクをタップするとコピーできます。心配な場合は「🔄再発行」で古いリンクを無効化できます（再発行後は古いリンクではアクセスできなくなります）。
+        </p>
+        <div id="teamLinkList" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+    </div>
+
+    <!-- チームから提出された選手名簿の承認待ち一覧 -->
+    <div class="admin-section" id="rosterPendingAdmin">
+      <div class="admin-form-card">
+        <div class="admin-form-title">📋 提出された選手名簿（承認待ち）</div>
+        <p style="font-size:12px;color:#666;line-height:1.6;margin-bottom:.6rem;">
+          チームがリンクから提出した内容がここに並びます。内容を確認して「承認して公開」を押すと選手紹介ページに反映されます。おかしい場合は「却下」で提出前に戻せます（チーム側は再提出できます）。
+        </p>
+        <button class="ubtn" style="background:#6b7a99;" onclick="downloadPendingRosterCSV()">📥 提出データをCSVでダウンロード</button>
+        <div id="rosterPendingStatus" style="font-size:12px;color:#666;margin-top:.4rem;"></div>
+      </div>
+      <div id="rosterPendingList" style="display:flex;flex-direction:column;gap:10px;"></div>
     </div>
 
     <!-- 大会設定（サイト名・ロゴ・大会設定CSV） -->
@@ -1892,6 +1976,39 @@ img{
 </div><!-- /admin-panel -->
 </div><!-- /page-admin -->
 
+<!-- チーム専用 選手名簿入力ページ（?roster=トークン がある時だけ表示。通常ナビからは行けない） -->
+<div class="page-view" id="page-team-input">
+<div class="wrap" style="padding-top:1rem;max-width:640px;margin:0 auto;">
+  <div id="tiNotFound" style="display:none;text-align:center;padding:3rem 1rem;color:#888;">
+    <div style="font-size:40px;margin-bottom:.5rem;">🔒</div>
+    <div style="font-weight:700;margin-bottom:.4rem;color:#555;">リンクが無効か、期限が切れています</div>
+    <div style="font-size:13px;line-height:1.6;">お手数ですが大会事務局に新しいリンクの発行をご依頼ください。</div>
+  </div>
+  <div id="tiFormWrap" style="display:none;">
+    <div style="text-align:center;margin-bottom:1rem;">
+      <div style="font-size:11px;color:#888;letter-spacing:.05em;">選手名簿 入力フォーム</div>
+      <div id="tiTeamName" style="font-size:20px;font-weight:800;color:#1a3260;margin-top:.2rem;"></div>
+    </div>
+    <div id="tiPendingNotice" style="display:none;background:#fff8e6;border:1px solid #f0d68a;border-radius:8px;padding:.7rem .9rem;font-size:12px;color:#8a6010;margin-bottom:1rem;line-height:1.6;"></div>
+    <div class="admin-form-card">
+      <div class="admin-form-title">チーム情報</div>
+      <div class="fr"><input type="text" id="tiManager" placeholder="監督名" style="flex:1;font-size:14px;padding:8px;border:1px solid #ddd;border-radius:8px;"></div>
+      <div class="fr"><input type="text" id="tiCoaches" placeholder="コーチ名（複数はカンマ区切りでOK）" style="flex:1;font-size:14px;padding:8px;border:1px solid #ddd;border-radius:8px;"></div>
+    </div>
+    <div class="admin-form-card">
+      <div class="admin-form-title">選手名簿</div>
+      <p style="font-size:12px;color:#666;line-height:1.6;margin-bottom:.6rem;">氏名だけ入力すれば登録できます。他の項目はわかる範囲で構いません。</p>
+      <div id="tiRosterRows"></div>
+      <button type="button" class="ubtn" style="background:#6b7a99;" onclick="tiAddRow()">＋ 選手を追加する</button>
+    </div>
+    <div class="submit-error" id="tiError"></div>
+    <div class="submit-success" id="tiSuccess"></div>
+    <button class="ubtn" onclick="submitTeamRoster()">この内容で提出する</button>
+    <p style="font-size:11px;color:#999;margin-top:.6rem;line-height:1.6;">提出後、大会事務局が内容を確認してから選手紹介ページに反映されます。反映まで少しお待ちください。同じリンクからいつでも内容を修正して再提出できます。</p>
+  </div>
+</div>
+</div>
+
 <!-- リセット確認モーダル -->
 <div id="resetModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:3000;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:16px;padding:1.5rem;max-width:320px;width:90%;margin:auto;margin-top:20vh;">
@@ -1970,6 +2087,10 @@ function matchCheersForPlayer(teamName, playerId, playerName){
 // 選手の一意ID発番（名前・背番号が変わっても写真・応援メッセージの紐付けを維持するためのキー）
 function genPlayerId(){
   return 'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+}
+// チーム専用の選手名簿入力リンク用トークン発番（推測されにくいよう長めのランダム文字列）
+function genRosterToken(){
+  return Date.now().toString(36)+Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10);
 }
 // 管理番号ラベル（メッセージ：M1,M2... / 写真：F1,F2...）。seq_no未設定（SQL未実行）の間は表示しない
 function msgLabel(seqNo){ return (seqNo==null)?'':'M'+seqNo; }
@@ -2664,6 +2785,29 @@ async function saveTeamsRoster(teams){
   const {error}=await sb.from('settings').upsert({key:'teams_roster',value:JSON.stringify(teams)},{onConflict:'key'});
   if(error){ console.error('teams_roster保存エラー:',error); throw error; }
   TEAMS_ROSTER=teams;
+}
+
+/* ---------- チーム専用リンクからの選手名簿入力・承認フロー ---------- */
+// 提出データ（未承認）: [{token, teamName, manager, coaches, roster:[{num,grade,name,batThrow,pos,dream,captain}], submittedAt}]
+let PENDING_ROSTER=[];
+async function savePendingRoster(list){
+  const {error}=await sb.from('settings').upsert({key:'roster_pending',value:JSON.stringify(list)},{onConflict:'key'});
+  if(error){ console.error('roster_pending保存エラー:',error); throw error; }
+  PENDING_ROSTER=list;
+}
+function findTeamByToken(token){
+  if(!token) return null;
+  return TEAMS_ROSTER.find(t=>t.editToken===token)||null;
+}
+function findPendingByToken(token){
+  return PENDING_ROSTER.find(p=>p.token===token)||null;
+}
+// チーム専用入力リンクのURLを組み立てる
+function buildRosterLinkUrl(token){
+  const url=new URL(location.href);
+  url.search='?roster='+encodeURIComponent(token);
+  url.hash='';
+  return url.toString();
 }
 
 // 選手名簿：Excelテンプレート（サンプル）ダウンロード
@@ -3483,8 +3627,8 @@ async function deleteMyPost(id){
   if(!entry) return;
   if(!confirm('この投稿を削除します。元に戻せません。よろしいですか？')) return;
   try{
-    const table=entry.type==='cheer'?'messages':'photos';
-    const {error}=await withTimeout(sb.from(table).delete().eq('id',id).eq('delete_token',entry.token), 8000);
+    const rpcName=entry.type==='cheer'?'delete_own_message':'delete_own_photo';
+    const {error}=await withTimeout(sb.rpc(rpcName,{target_id:id, token:entry.token}), 8000);
     if(error){ alert('削除に失敗しました：'+friendlyErrorMessage(error)); return; }
     removeMyPost(id);
     if(entry.type==='cheer'){
@@ -3679,8 +3823,7 @@ function closeModal(){
 // パスワードはSHA-256ハッシュで保持（平文は保存しない）
 // 初回未設定時（Supabase settingsにadmin_pw_hashが存在しない場合）のフォールバック値
 // ※実際の管理パスワードはSupabase settingsテーブルで一元管理（loadSettingsFromSupabaseで取得）
-const ADMIN_PW_HASH_DEFAULT='a913c57369a62734d5640eab86d18c83ec71bf51a4da0be782ef1639b65f5b7b';
-let ADMIN_PW_HASH=ADMIN_PW_HASH_DEFAULT;
+// 旧方式（admin_pw_hashをsettingsテーブルに保存して照合）はSupabase Auth化により廃止
 
 function loadLS(key,fallback){
   try{
@@ -4421,14 +4564,24 @@ async function submitCheer(){
 }
 
 /* ---------- 管理者画面 ---------- */
-function openAdminLogin(){
+async function openAdminLogin(){
   // 管理タブに切り替え
   const adminBtn=document.querySelector('.page-nav-btn:last-child');
   if(adminBtn) switchPage(adminBtn,'admin');
-  document.getElementById('adminLoginView').style.display='block';
-  document.getElementById('adminMainView').style.display='none';
   document.getElementById('adminPw').value='';
   document.getElementById('adminPwError').style.display='none';
+  // 既にログイン済み（セッションが有効）ならパスワード入力を省略
+  try{
+    const {data}=await sb.auth.getSession();
+    if(data && data.session){
+      document.getElementById('adminLoginView').style.display='none';
+      document.getElementById('adminMainView').style.display='block';
+      renderAdminAll();
+      return;
+    }
+  }catch(e){ console.warn('セッション確認エラー:',e); }
+  document.getElementById('adminLoginView').style.display='block';
+  document.getElementById('adminMainView').style.display='none';
 }
 function closeAdminPanel(){
   // トップタブに戻る
@@ -4437,14 +4590,29 @@ function closeAdminPanel(){
 }
 async function adminLogin(){
   const pw=document.getElementById('adminPw').value;
-  const h=await hashPw(pw);
-  if(h===ADMIN_PW_HASH){
+  const errEl=document.getElementById('adminPwError');
+  errEl.style.display='none';
+  try{
+    const {error}=await sb.auth.signInWithPassword({email:ADMIN_EMAIL, password:pw});
+    if(error){
+      errEl.textContent='パスワードが違います';
+      errEl.style.display='block';
+      return;
+    }
     document.getElementById('adminLoginView').style.display='none';
     document.getElementById('adminMainView').style.display='block';
     renderAdminAll();
-  } else {
-    document.getElementById('adminPwError').style.display='block';
+  }catch(e){
+    errEl.textContent='ログインに失敗しました：'+e.message;
+    errEl.style.display='block';
   }
+}
+async function adminLogout(){
+  if(!confirm('ログアウトしますか？')) return;
+  try{ await sb.auth.signOut(); }catch(e){ console.warn('ログアウトエラー:',e); }
+  document.getElementById('adminMainView').style.display='none';
+  document.getElementById('adminLoginView').style.display='block';
+  closeAdminPanel();
 }
 function switchAdminTab(el,sectionId){
   document.querySelectorAll('.admin-tab').forEach(t=>t.classList.remove('on'));
@@ -4468,6 +4636,47 @@ function switchAdminTab(el,sectionId){
     const rowA=document.getElementById('gScoreARow');
     if(rowA&&rowA.children.length===0) renderInningInputs(6,[],[]);
   }
+  if(sectionId==='errorLogAdmin'){
+    loadErrorLogs();
+  }
+}
+async function loadErrorLogs(){
+  const statusEl=document.getElementById('errorLogStatus');
+  const listEl=document.getElementById('errorLogList');
+  statusEl.textContent='読み込み中...';
+  try{
+    const {data,error}=await sb.from('error_logs').select('*').order('created_at',{ascending:false}).limit(100);
+    if(error){ statusEl.textContent='読み込みに失敗しました：'+error.message; return; }
+    if(!data || data.length===0){
+      statusEl.textContent='記録されたエラーはありません。';
+      listEl.innerHTML='';
+      return;
+    }
+    statusEl.textContent=data.length+'件表示中（新しい順）';
+    listEl.innerHTML=data.map(row=>{
+      const dt=row.created_at ? new Date(row.created_at).toLocaleString('ja-JP') : '';
+      return `<div style="border-bottom:1px solid #eee;padding:.6rem 0;font-size:12px;">
+        <div style="color:#999;font-size:11px;">${esc(dt)}｜${esc(row.source||'')}</div>
+        <div style="color:#c00;font-weight:bold;margin:.2rem 0;">${esc(row.message||'')}</div>
+        <div style="color:#888;word-break:break-all;">${esc(row.url||'')}</div>
+        <details style="margin-top:.3rem;">
+          <summary style="cursor:pointer;color:#666;">詳細</summary>
+          <div style="color:#666;white-space:pre-wrap;word-break:break-all;margin-top:.3rem;">${esc(row.stack||'(スタック情報なし)')}</div>
+          <div style="color:#999;margin-top:.3rem;">${esc(row.user_agent||'')}</div>
+        </details>
+      </div>`;
+    }).join('');
+  }catch(e){
+    statusEl.textContent='読み込みに失敗しました：'+e.message;
+  }
+}
+async function clearErrorLogs(){
+  if(!confirm('エラーログを全件削除します。よろしいですか？')) return;
+  try{
+    const {error}=await sb.from('error_logs').delete().neq('id','00000000-0000-0000-0000-000000000000');
+    if(error){ alert('削除に失敗しました：'+error.message); return; }
+    loadErrorLogs();
+  }catch(e){ alert('削除に失敗しました：'+e.message); }
 }
 function closeAdminModal(){
   document.querySelectorAll('.admin-tab').forEach(t=>t.classList.remove('on'));
@@ -5345,6 +5554,8 @@ function renderAlbumAdmin(){
   // 大会要綱の初期描画
   renderTournamentInfo(getDisplayTournamentInfo());
   renderInfoImages();
+  // チーム専用リンク（?roster=トークン）でのアクセスなら、その入力ページだけを表示する
+  checkTeamTokenAccess();
 
   // ---- Supabase Realtime 自動同期 ----
   let _realtimeOk=false;
@@ -5466,6 +5677,7 @@ function renderAlbumAdmin(){
     await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase()]);
     checkPeriods();
     _refreshPublic(); _refreshAdmin();
+    renderAllTeamViews();
   }, 10000);
 
   // 画面復帰時（アプリ切り替え・画面ロック解除など）は、ポーリングの最大10秒待ちを待たずに
@@ -5643,18 +5855,13 @@ async function execChangePw(){
     errEl.textContent='パスワードが一致しません';
     errEl.style.display='block'; return;
   }
-  const h=await hashPw(newPw);
-  const {error}=await sb.from('settings').upsert({key:'admin_pw_hash',value:h},{onConflict:'key'});
+  const {error}=await sb.auth.updateUser({password:newPw});
   if(error){
     errEl.textContent='保存に失敗しました：'+error.message;
     errEl.style.display='block'; return;
   }
-  ADMIN_PW_HASH=h;
-  // 旧localStorage方式のキーは削除（移行済みのため）
-  localStorage.removeItem('hk_adminPwHash');
-  localStorage.removeItem('hk_adminPw');
   closeChangePwModal();
-  alert('✅ パスワードを変更しました！（全端末に反映されます）');
+  alert('✅ パスワードを変更しました！（次回ログインから新しいパスワードが必要です）');
 }
 function switchPage(btn,pageId){
   document.querySelectorAll('.page-nav-btn').forEach(b=>b.classList.remove('on'));
@@ -5701,11 +5908,11 @@ async function loadSettingsFromSupabase(){
       const el=document.getElementById('spThresholdInput');
       if(el) el.value=SP_THRESHOLD;
     }
-    if(row.key==='admin_pw_hash' && row.value){
-      ADMIN_PW_HASH=row.value;
-    }
     if(row.key==='teams_roster'){
       try{ TEAMS_ROSTER=JSON.parse(row.value)||[]; }catch(e){ TEAMS_ROSTER=[]; }
+    }
+    if(row.key==='roster_pending'){
+      try{ PENDING_ROSTER=JSON.parse(row.value)||[]; }catch(e){ PENDING_ROSTER=[]; }
     }
     if(row.key==='tournament_info'){
       try{ TOURNAMENT_INFO=JSON.parse(row.value)||[]; }catch(e){ TOURNAMENT_INFO=[]; }
@@ -6036,6 +6243,399 @@ function renderAllTeamViews(){
   initRosterPhotoTeamList();
   initBulkRosterPhotoTeamList();
   initPlTeamTabs();
+  renderTeamLinkAdmin();
+  renderRosterPendingAdmin();
+}
+
+/* =========================================================
+   チーム専用リンクによる選手名簿入力・承認フロー
+   ========================================================= */
+
+/* ---- 管理画面：①チーム追加＋リンク発行／②チーム一覧 ---- */
+async function addNewTeamWithLink(){
+  const nameEl=document.getElementById('newTeamLinkName');
+  const name=(nameEl.value||'').trim();
+  const statusEl=document.getElementById('newTeamLinkStatus');
+  if(!name){ statusEl.textContent='❌ チーム名を入力してください。'; return; }
+  if(TEAMS_ROSTER.some(t=>t.name===name)){ statusEl.textContent='❌ 同じ名前のチームがすでにあります。'; return; }
+  const isHost=(document.querySelector('input[name="newTeamLinkHost"]:checked')||{}).value==='host';
+  const newTeam={ name, manager:'', coaches:'', isHost, roster:[], editToken:genRosterToken() };
+  statusEl.textContent='保存中…';
+  try{
+    const teams=[...TEAMS_ROSTER, newTeam];
+    await saveTeamsRoster(teams);
+    nameEl.value='';
+    renderAllTeamViews();
+    statusEl.textContent='✅「'+name+'」を追加し、入力リンクを発行しました。下の一覧からリンクをコピーしてチームにお送りください。';
+  }catch(err){
+    statusEl.textContent='❌ 保存に失敗しました：'+err.message;
+  }
+}
+
+function renderTeamLinkAdmin(){
+  const list=document.getElementById('teamLinkList');
+  if(!list) return;
+  list.innerHTML='';
+  if(TEAMS_ROSTER.length===0){
+    list.innerHTML='<div style="font-size:12px;color:#aaa;text-align:center;padding:1rem 0;">まだチームが登録されていません</div>';
+    return;
+  }
+  TEAMS_ROSTER.forEach(team=>{
+    const row=document.createElement('div');
+    row.style.cssText='border:1px solid #e5e7f0;border-radius:10px;padding:.7rem .8rem;';
+    const top=document.createElement('div');
+    top.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:.4rem;';
+    const nameSpan=document.createElement('div');
+    nameSpan.style.cssText='font-size:13px;font-weight:700;color:#1a3260;';
+    nameSpan.textContent=team.name+(team.isHost?'（自チーム）':'（対戦チーム）');
+    const countSpan=document.createElement('span');
+    countSpan.style.cssText='font-size:11px;color:#888;font-weight:400;margin-left:6px;';
+    countSpan.textContent=(team.roster||[]).length+'名';
+    nameSpan.appendChild(countSpan);
+    top.appendChild(nameSpan);
+    row.appendChild(top);
+
+    const btnRow=document.createElement('div');
+    btnRow.style.cssText='display:flex;gap:6px;flex-wrap:wrap;';
+    const copyBtn=document.createElement('button');
+    copyBtn.type='button';
+    copyBtn.style.cssText='flex:1;min-width:140px;font-size:12px;padding:7px 8px;border:1px solid #c8d0e8;background:#f0f2f8;color:#1a3260;border-radius:8px;cursor:pointer;';
+    copyBtn.textContent='🔗 入力リンクをコピー';
+    copyBtn.onclick=()=>copyTeamLink(team, copyBtn);
+    const regenBtn=document.createElement('button');
+    regenBtn.type='button';
+    regenBtn.style.cssText='font-size:12px;padding:7px 10px;border:1px solid #ddd;background:#fff;color:#888;border-radius:8px;cursor:pointer;';
+    regenBtn.textContent='🔄 再発行';
+    regenBtn.onclick=()=>regenerateTeamLink(team.name);
+    btnRow.appendChild(copyBtn);
+    btnRow.appendChild(regenBtn);
+    row.appendChild(btnRow);
+    list.appendChild(row);
+  });
+}
+
+async function ensureTeamToken(team){
+  if(team.editToken) return team.editToken;
+  const token=genRosterToken();
+  const teams=TEAMS_ROSTER.map(t=>t.name===team.name?{...t,editToken:token}:t);
+  await saveTeamsRoster(teams);
+  return token;
+}
+
+async function copyTeamLink(team, btnEl){
+  const token=await ensureTeamToken(team);
+  const url=buildRosterLinkUrl(token);
+  const orig=btnEl?btnEl.textContent:'';
+  try{
+    await navigator.clipboard.writeText(url);
+    if(btnEl){ btnEl.textContent='✅ コピーしました'; setTimeout(()=>{btnEl.textContent=orig;},1800); }
+  }catch(e){
+    // クリップボードAPIが使えない環境向けフォールバック
+    window.prompt('このURLをコピーしてお使いください：', url);
+  }
+  renderTeamLinkAdmin();
+}
+
+async function regenerateTeamLink(teamName){
+  if(!confirm('リンクを再発行すると、これまで送っていたリンクは使えなくなります。よろしいですか？')) return;
+  const teams=TEAMS_ROSTER.map(t=>t.name===teamName?{...t,editToken:genRosterToken()}:t);
+  try{
+    await saveTeamsRoster(teams);
+    renderTeamLinkAdmin();
+  }catch(err){ alert('❌ 再発行に失敗しました：'+err.message); }
+}
+
+/* ---- 管理画面：③提出された名簿の承認待ち一覧 ---- */
+function renderAdminRosterPendingCount(){
+  const el=document.getElementById('rosterPendingCount');
+  if(el) el.textContent=PENDING_ROSTER.length;
+}
+
+function renderRosterPendingAdmin(){
+  renderAdminRosterPendingCount();
+  const list=document.getElementById('rosterPendingList');
+  if(!list) return;
+  list.innerHTML='';
+  if(PENDING_ROSTER.length===0){
+    list.innerHTML='<div style="font-size:12px;color:#aaa;text-align:center;padding:1rem 0;">現在、承認待ちの提出はありません</div>';
+    return;
+  }
+  PENDING_ROSTER.forEach(sub=>{
+    const card=document.createElement('div');
+    card.className='admin-form-card';
+    card.style.marginBottom='0';
+    const title=document.createElement('div');
+    title.className='admin-form-title';
+    title.textContent=(sub.teamName||'(チーム名未設定)')+' からの提出';
+    card.appendChild(title);
+
+    const meta=document.createElement('div');
+    meta.style.cssText='font-size:11px;color:#888;margin-bottom:.5rem;';
+    let submittedLabel='';
+    try{ submittedLabel=sub.submittedAt?new Date(sub.submittedAt).toLocaleString('ja-JP'):''; }catch(e){}
+    meta.textContent=(submittedLabel?'提出日時：'+submittedLabel+'　':'')+'監督：'+(sub.manager||'（未入力）')+'　コーチ：'+(sub.coaches||'（未入力）');
+    card.appendChild(meta);
+
+    const tableWrap=document.createElement('div');
+    tableWrap.style.cssText='overflow-x:auto;';
+    const roster=sub.roster||[];
+    if(roster.length===0){
+      const empty=document.createElement('div');
+      empty.style.cssText='font-size:12px;color:#aaa;padding:.4rem 0;';
+      empty.textContent='選手データが入力されていません';
+      tableWrap.appendChild(empty);
+    }else{
+      const table=document.createElement('table');
+      table.style.cssText='width:100%;border-collapse:collapse;font-size:12px;';
+      table.innerHTML='<thead><tr style="color:#888;text-align:left;"><th style="padding:3px 6px;">番号</th><th style="padding:3px 6px;">学年</th><th style="padding:3px 6px;">氏名</th><th style="padding:3px 6px;">打/投</th><th style="padding:3px 6px;">守備</th><th style="padding:3px 6px;">キャプテン</th></tr></thead>';
+      const tbody=document.createElement('tbody');
+      roster.forEach(p=>{
+        const tr=document.createElement('tr');
+        tr.style.borderTop='1px solid #eee';
+        tr.innerHTML=`<td style="padding:4px 6px;">${esc(p.num)}</td><td style="padding:4px 6px;">${esc(p.grade)}</td><td style="padding:4px 6px;font-weight:600;">${esc(p.name)}</td><td style="padding:4px 6px;">${esc(p.batThrow)}</td><td style="padding:4px 6px;">${esc(p.pos)}</td><td style="padding:4px 6px;">${esc(p.captain)}</td>`;
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+    }
+    card.appendChild(tableWrap);
+
+    const btnRow=document.createElement('div');
+    btnRow.style.cssText='display:flex;gap:8px;margin-top:.7rem;';
+    const approveBtn=document.createElement('button');
+    approveBtn.type='button';
+    approveBtn.className='ubtn';
+    approveBtn.style.cssText='margin-top:0;background:#1a3260;';
+    approveBtn.textContent='✅ 承認して公開';
+    approveBtn.onclick=()=>approveRosterSubmission(sub.token);
+    const rejectBtn=document.createElement('button');
+    rejectBtn.type='button';
+    rejectBtn.style.cssText='flex:0 0 auto;font-size:12px;padding:8px 14px;border:1px solid #ddd;background:#fff;color:#c8273c;border-radius:8px;cursor:pointer;';
+    rejectBtn.textContent='🗑️ 却下';
+    rejectBtn.onclick=()=>rejectRosterSubmission(sub.token);
+    btnRow.appendChild(approveBtn);
+    btnRow.appendChild(rejectBtn);
+    card.appendChild(btnRow);
+
+    list.appendChild(card);
+  });
+}
+
+async function approveRosterSubmission(token){
+  const sub=findPendingByToken(token);
+  if(!sub) return;
+  const statusEl=document.getElementById('rosterPendingStatus');
+  if(statusEl) statusEl.textContent='反映中…';
+  try{
+    const oldTeam=TEAMS_ROSTER.find(t=>t.editToken===token);
+    if(!oldTeam){
+      if(statusEl) statusEl.textContent='❌ 対象のチームが見つかりませんでした（リンクが再発行された可能性があります）。';
+      return;
+    }
+    // ID・写真の引き継ぎ：氏名一致する既存選手からID・写真を引き継ぐ（Excel登録時と同じ考え方）
+    const oldRosterByName={};
+    (oldTeam.roster||[]).forEach(p=>{ if(p.name) oldRosterByName[normalizeForMatch(p.name)]=p; });
+    const newRoster=(sub.roster||[]).map(p=>{
+      const match=oldRosterByName[normalizeForMatch(p.name)];
+      return {
+        num:p.num||'', grade:p.grade||'', name:p.name||'',
+        batThrow:p.batThrow||'', pos:p.pos||'', dream:p.dream||'', captain:p.captain||'',
+        id:(match&&match.id)?match.id:genPlayerId(),
+        photoUrl:(match&&match.photoUrl)?match.photoUrl:undefined
+      };
+    });
+    const teams=TEAMS_ROSTER.map(t=>{
+      if(t.editToken!==token) return t;
+      return {
+        ...t,
+        manager:sub.manager||t.manager||'',
+        coaches:sub.coaches||t.coaches||'',
+        roster:newRoster
+      };
+    });
+    await saveTeamsRoster(teams);
+    await savePendingRoster(PENDING_ROSTER.filter(p=>p.token!==token));
+    renderAllTeamViews();
+    if(statusEl) statusEl.textContent='✅「'+(sub.teamName||oldTeam.name)+'」の選手名簿を公開しました。';
+  }catch(err){
+    if(statusEl) statusEl.textContent='❌ 反映に失敗しました：'+err.message;
+  }
+}
+
+async function rejectRosterSubmission(token){
+  if(!confirm('この提出内容を却下します。チーム側は同じリンクから再提出できます。よろしいですか？')) return;
+  try{
+    await savePendingRoster(PENDING_ROSTER.filter(p=>p.token!==token));
+    renderRosterPendingAdmin();
+  }catch(err){ alert('❌ 却下処理に失敗しました：'+err.message); }
+}
+
+// 提出データ（承認待ち全件）をCSVでダウンロード
+function downloadPendingRosterCSV(){
+  if(PENDING_ROSTER.length===0){ alert('現在、承認待ちの提出データはありません。'); return; }
+  const header=['チーム名','提出日時','監督','コーチ','背番号','学年','氏名','打/投','守備','将来の夢','キャプテン'];
+  const rows=[header];
+  PENDING_ROSTER.forEach(sub=>{
+    let submittedLabel='';
+    try{ submittedLabel=sub.submittedAt?new Date(sub.submittedAt).toLocaleString('ja-JP'):''; }catch(e){}
+    const roster=sub.roster&&sub.roster.length>0?sub.roster:[{}];
+    roster.forEach(p=>{
+      rows.push([sub.teamName||'',submittedLabel,sub.manager||'',sub.coaches||'',p.num||'',p.grade||'',p.name||'',p.batThrow||'',p.pos||'',p.dream||'',p.captain||'']);
+    });
+  });
+  const csvBody=rows.map(r=>r.map(csvEscapeCell).join(',')).join('\r\n');
+  // Excelで文字化けしないようUTF-8 BOM付きで出力
+  const blob=new Blob(['\uFEFF'+csvBody],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='選手名簿_承認待ち提出データ.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function csvEscapeCell(v){
+  const s=(v==null?'':String(v));
+  if(/[",\r\n]/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
+  return s;
+}
+
+/* ---- チーム専用入力ページ（?roster=トークン） ---- */
+let _tiCurrentToken=null;
+let _tiRowSeq=0;
+
+function checkTeamTokenAccess(){
+  let token='';
+  try{ token=new URLSearchParams(location.search).get('roster')||''; }catch(e){}
+  if(!token) return;
+  showTeamInputPage(token);
+}
+
+function showTeamInputPage(token){
+  _tiCurrentToken=token;
+  const nav=document.querySelector('.page-nav');
+  if(nav) nav.style.display='none';
+  document.querySelectorAll('.page-view').forEach(v=>v.classList.remove('on'));
+  const page=document.getElementById('page-team-input');
+  if(page) page.classList.add('on');
+  const team=findTeamByToken(token);
+  if(!team){
+    document.getElementById('tiNotFound').style.display='block';
+    document.getElementById('tiFormWrap').style.display='none';
+    return;
+  }
+  document.getElementById('tiNotFound').style.display='none';
+  document.getElementById('tiFormWrap').style.display='block';
+  const pending=findPendingByToken(token);
+  document.getElementById('tiTeamName').textContent=team.name;
+  document.getElementById('tiManager').value=(pending?pending.manager:team.manager)||'';
+  document.getElementById('tiCoaches').value=(pending?pending.coaches:team.coaches)||'';
+  const noticeEl=document.getElementById('tiPendingNotice');
+  if(pending){
+    let submittedLabel='';
+    try{ submittedLabel=pending.submittedAt?new Date(pending.submittedAt).toLocaleString('ja-JP'):''; }catch(e){}
+    noticeEl.style.display='block';
+    noticeEl.textContent='⏳ '+(submittedLabel?submittedLabel+'に':'')+'提出済みの内容です（まだ承認待ちです）。内容を修正して再提出できます。';
+  }else{
+    noticeEl.style.display='none';
+  }
+  const sourceRoster=(pending?pending.roster:team.roster)||[];
+  const rowsEl=document.getElementById('tiRosterRows');
+  rowsEl.innerHTML='';
+  _tiRowSeq=0;
+  if(sourceRoster.length>0){
+    sourceRoster.forEach(p=>tiAddRow(p));
+  }else{
+    tiAddRow(); tiAddRow(); tiAddRow();
+  }
+}
+
+function tiAddRow(data){
+  data=data||{};
+  const rowsEl=document.getElementById('tiRosterRows');
+  if(!rowsEl) return;
+  const rowId='tiRow'+(_tiRowSeq++);
+  const wrap=document.createElement('div');
+  wrap.id=rowId;
+  wrap.style.cssText='border:1px solid #e5e7f0;border-radius:10px;padding:.6rem .7rem;margin-bottom:.6rem;';
+
+  const grid=document.createElement('div');
+  grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;';
+
+  function makeField(labelText, value, placeholder, span2){
+    const box=document.createElement('div');
+    if(span2) box.style.gridColumn='1 / -1';
+    const label=document.createElement('div');
+    label.style.cssText='font-size:10px;color:#999;margin-bottom:2px;';
+    label.textContent=labelText;
+    const input=document.createElement('input');
+    input.type='text';
+    input.value=value||'';
+    input.placeholder=placeholder||'';
+    input.style.cssText='width:100%;box-sizing:border-box;font-size:14px;padding:7px 8px;border:1px solid #ddd;border-radius:8px;';
+    box.appendChild(label);
+    box.appendChild(input);
+    grid.appendChild(box);
+    return input;
+  }
+  const numInput=makeField('背番号','','例：10');
+  const gradeInput=makeField('学年','','例：6年');
+  const nameInput=makeField('氏名（必須）','','例：田中一郎',true);
+  const batThrowInput=makeField('打/投','','例：右投右打');
+  const posInput=makeField('守備','','例：投手');
+  const captainInput=makeField('キャプテン','','例：◎（空欄可）');
+  const dreamInput=makeField('将来の夢','','例：プロ野球選手',true);
+
+  numInput.value=data.num||''; gradeInput.value=data.grade||''; nameInput.value=data.name||'';
+  batThrowInput.value=data.batThrow||''; posInput.value=data.pos||''; captainInput.value=data.captain||''; dreamInput.value=data.dream||'';
+
+  wrap.appendChild(grid);
+  wrap._tiFields={num:numInput,grade:gradeInput,name:nameInput,batThrow:batThrowInput,pos:posInput,captain:captainInput,dream:dreamInput};
+
+  const delBtn=document.createElement('button');
+  delBtn.type='button';
+  delBtn.textContent='✕ この選手を削除';
+  delBtn.style.cssText='font-size:11px;color:#c8273c;background:none;border:none;cursor:pointer;padding:2px 0;';
+  delBtn.onclick=()=>wrap.remove();
+  wrap.appendChild(delBtn);
+
+  rowsEl.appendChild(wrap);
+}
+
+async function submitTeamRoster(){
+  const errEl=document.getElementById('tiError');
+  const okEl=document.getElementById('tiSuccess');
+  errEl.textContent=''; okEl.textContent='';
+  const team=findTeamByToken(_tiCurrentToken);
+  if(!team){ showInlineMsg('tiError','エラーが発生しました。ページを再読み込みしてください。'); return; }
+  const rowsEl=document.getElementById('tiRosterRows');
+  const roster=[];
+  let hasBlankNameRow=false;
+  Array.from(rowsEl.children).forEach(wrap=>{
+    const f=wrap._tiFields;
+    if(!f) return;
+    const name=(f.name.value||'').trim();
+    const anyOther=[f.num.value,f.grade.value,f.batThrow.value,f.pos.value,f.captain.value,f.dream.value].some(v=>(v||'').trim());
+    if(!name){ if(anyOther) hasBlankNameRow=true; return; } // 氏名が空の行は無視（他の項目だけ入っている場合は警告）
+    roster.push({
+      num:(f.num.value||'').trim(), grade:(f.grade.value||'').trim(), name,
+      batThrow:(f.batThrow.value||'').trim(), pos:(f.pos.value||'').trim(),
+      captain:(f.captain.value||'').trim(), dream:(f.dream.value||'').trim()
+    });
+  });
+  if(hasBlankNameRow){ showInlineMsg('tiError','氏名が未入力の行があります。氏名を入力するか、その行を削除してください。'); return; }
+  if(roster.length===0){ showInlineMsg('tiError','1人以上、選手を入力してください。'); return; }
+  const manager=(document.getElementById('tiManager').value||'').trim();
+  const coaches=(document.getElementById('tiCoaches').value||'').trim();
+  const entry={ token:_tiCurrentToken, teamName:team.name, manager, coaches, roster, submittedAt:new Date().toISOString() };
+  try{
+    const list=PENDING_ROSTER.filter(p=>p.token!==_tiCurrentToken);
+    list.push(entry);
+    await savePendingRoster(list);
+    showInlineMsg('tiSuccess','✅ 提出しました。大会事務局の確認後、選手紹介ページに反映されます。');
+  }catch(err){
+    showInlineMsg('tiError','❌ 送信に失敗しました。電波の良い場所でもう一度お試しください：'+err.message);
+  }
 }
 
 function initPlTeamTabs(){
