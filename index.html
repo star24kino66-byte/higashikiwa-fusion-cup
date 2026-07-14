@@ -16,7 +16,14 @@ const SUPABASE_URL = 'https://xohjlirseoyuklehqrmx.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_0dcx37bRhzPywFX59OBERA_E6UMWVp5';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // 管理者ログイン用メールアドレス（Supabase Authのユーザー作成時と同じものを設定）
-const ADMIN_EMAIL = 'higashikiwa50th-staff@example.com';
+const ADMIN_EMAIL = 'star24kino66@gmail.com';
+
+// 同一GitHub Pagesオリジン上で複数サイト（大会）を運用する際、localStorageは
+// オリジン単位で共有されパスでは分離されないため、SUPABASE_URLのプロジェクトrefを
+// サイト固有の識別子として使い、localStorageキーの末尾に付与して混線を防ぐ。
+function siteKey(){
+  try{ return SUPABASE_URL.replace('https://','').split('.')[0]; }catch(e){ return 'default'; }
+}
 
 /* ---------- エラーログ自動収集（商品改良・サポート対応用） ---------- */
 function logErrorToSupabase(message, stack, source){
@@ -2288,7 +2295,7 @@ async function hashPw(str){
 }
 
 // GAMES（localStorageから読み込み、なければサンプル）
-const STORAGE_KEY='higashikiwa_viewed_games';
+const STORAGE_KEY='higashikiwa_viewed_games_'+siteKey();
 // Supabaseから読み込む（初期は空、loadGamesFromSupabase()で取得）
 let GAMES=[];
 let BLOCKS=[];
@@ -2357,7 +2364,7 @@ const THEME_LIST=[
   {id:'pastel',    emoji:'🌸', label:'パステル'},
   {id:'minecraft', emoji:'⛏️', label:'ピクセルクラフト'},
 ];
-const THEME_OVERRIDE_KEY='hk_theme_override'; // 端末ごとの上書き（localStorage・パスワード不要）
+const THEME_OVERRIDE_KEY='hk_theme_override_'+siteKey(); // 端末ごとの上書き（localStorage・パスワード不要）
 let SITE_THEME='classic'; // サイト全体のデフォルト（管理者設定・Supabase保存）
 
 function applyThemeToDOM(themeId){
@@ -2640,7 +2647,7 @@ let LOGO_URL='';
 // ちらつき防止：前回表示したロゴをキャッシュから即座に反映（Supabase読み込み完了を待たない）
 (function(){
   try{
-    const cached=localStorage.getItem('hk_logo_url_cache');
+    const cached=localStorage.getItem('hk_logo_url_cache_'+siteKey());
     if(cached){
       const el=document.getElementById('siteLogoImg');
       if(el) el.src=cached;
@@ -2654,7 +2661,7 @@ function applyLogo(){
   if(noticeEl) noticeEl.style.display=LOGO_URL?'none':'block';
   if(!LOGO_URL) return;
   if(el) el.src=LOGO_URL;
-  try{ localStorage.setItem('hk_logo_url_cache', LOGO_URL); }catch(e){}
+  try{ localStorage.setItem('hk_logo_url_cache_'+siteKey(), LOGO_URL); }catch(e){}
 }
 async function uploadSiteLogo(){
   const fileInput=document.getElementById('siteLogoFileInput');
@@ -3295,8 +3302,8 @@ function renderBest9Grid(){
   wrap.appendChild(grid2);
   el.appendChild(wrap);
 }
-function getLikedIds(){try{return JSON.parse(localStorage.getItem('hk_liked')||'[]');}catch{return[];}}
-function addLikedId(id){try{const a=getLikedIds();if(!a.includes(id)){a.push(id);localStorage.setItem('hk_liked',JSON.stringify(a));}}catch{}}
+function getLikedIds(){try{return JSON.parse(localStorage.getItem('hk_liked_'+siteKey())||'[]');}catch{return[];}}
+function addLikedId(id){try{const a=getLikedIds();if(!a.includes(id)){a.push(id);localStorage.setItem('hk_liked_'+siteKey(),JSON.stringify(a));}}catch{}}
 async function tl(tab,i){
   const p=PH[tab][i]; if(!p) return;
   const k=tab+'_'+i;
@@ -3451,7 +3458,7 @@ function dismissSpBanner(){
 }
 
 function openVisitorEdit(){
-  const cur=loadLS('hk_manualVisitors',null);
+  const cur=loadLS('hk_manualVisitors_'+siteKey(),null);
   const auto=(()=>{
     const teams=getDisplayTeams();
     let totalPlayers=0; teams.forEach(t=>{ totalPlayers+=(t.roster||[]).length; });
@@ -3463,11 +3470,11 @@ function openVisitorEdit(){
 空白にすると自動計算に戻ります。`, cur!==null?cur:'');
   if(val===null) return; // キャンセル
   if(val.trim()===''){
-    saveLS('hk_manualVisitors',null);
+    saveLS('hk_manualVisitors_'+siteKey(),null);
   } else {
     const n=parseInt(val);
     if(isNaN(n)||n<0){ alert('正しい数値を入力してください'); return; }
-    saveLS('hk_manualVisitors',n);
+    saveLS('hk_manualVisitors_'+siteKey(),n);
   }
   updateDashboard();
 }
@@ -3836,7 +3843,7 @@ function saveLS(key,val){
 }
 
 // ===== 投稿者本人限定削除機能（この端末からの投稿のみ、承認前後問わず削除可） =====
-const MYPOSTS_KEY='hk_myPosts';
+const MYPOSTS_KEY='hk_myPosts_'+siteKey();
 function genDeleteToken(){
   try{ if(window.crypto && crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
   return 'tok_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
@@ -4026,7 +4033,7 @@ async function submitEntry(){
   if(!_pendingSubmitPhotoBlob){ showInlineMsg('submitError','写真を選択してください'); return; }
 
   // スパム・連打対策：直近の投稿から一定時間は再投稿不可
-  const photoCdKey='photoLastSubmitAt';
+  const photoCdKey='photoLastSubmitAt_'+siteKey();
   const photoCdRemain=getSubmitCooldownRemain(photoCdKey);
   if(photoCdRemain>0){
     showInlineMsg('submitError',`連続投稿はできません。あと${Math.ceil(photoCdRemain/1000)}秒お待ちください。`);
@@ -4509,7 +4516,7 @@ async function submitCheer(){
   const targetName=(!playerVal||playerVal==='_team_')?'（チーム全体）':playerDisplayName;
 
   // スパム・連打対策：直近の投稿から一定時間は再投稿不可
-  const cheerCdKey='cheerLastSubmitAt';
+  const cheerCdKey='cheerLastSubmitAt_'+siteKey();
   const cheerCdRemain=getSubmitCooldownRemain(cheerCdKey);
   if(cheerCdRemain>0){
     showInlineMsg('cheerError',`連続投稿はできません。あと${Math.ceil(cheerCdRemain/1000)}秒お待ちください。`);
