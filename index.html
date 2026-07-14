@@ -53,6 +53,40 @@ window.addEventListener('unhandledrejection', function(e){
 // donation: 寄付金・協賛管理機能（ナビタブ・ページ・ダッシュボード表示・管理画面・募集バナーを一括制御）
 const FEATURES = { donation: false };
 
+/* ---------- Storage抽象化層 ----------
+ * 画像等メディアファイルの保存先を、コード全体から隠蔽する窓口。
+ * 将来Cloudflare R2等へ移行する際は、この4関数の内部実装だけを差し替えれば
+ * 呼び出し側（投稿・ロゴ・参考画像・名簿写真・アルバム・削除処理）は一切変更不要。
+ * 返り値の形はsupabase-js Storage APIに合わせている：
+ *   storageUpload(path, blob[, options]) → Promise<{data, error}>
+ *   storageDelete(paths)                 → Promise<{data, error}>
+ *   storageGetUrl(path)                  → 公開URL文字列
+ *   storagePathFromUrl(url)              → 公開URLからバケット内パスを逆算（不明ならnull）
+ * 注意：supabase-jsのStorage APIはRLS拒否等でもrejectせず{error}で返すため、
+ * 呼び出し側は必ず{error}をチェックすること（.catchだけでは失敗を検知できない）。
+ */
+const STORAGE_BUCKET='photos';
+function storageUpload(path, blob, options){
+  return sb.storage.from(STORAGE_BUCKET).upload(path, blob,
+    Object.assign({contentType:'image/jpeg', upsert:false}, options||{}));
+}
+function storageDelete(paths){
+  return sb.storage.from(STORAGE_BUCKET).remove(paths);
+}
+function storageGetUrl(path){
+  return sb.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+function storagePathFromUrl(url){
+  if(!url) return null;
+  try{
+    const marker='/storage/v1/object/public/'+STORAGE_BUCKET+'/';
+    const idx=url.indexOf(marker);
+    if(idx===-1) return null;
+    const path=decodeURIComponent(url.slice(idx+marker.length));
+    return path||null;
+  }catch(e){ return null; }
+}
+
 // 通信タイムアウト対策：Supabaseの呼び出しが一定時間で応答しない場合に
 // 「保存できたか分からない」状態を防ぐためのラッパー。
 // 使い方：await withTimeout(sb.from('photos').update(...), 8000)
@@ -2672,10 +2706,9 @@ async function uploadSiteLogo(){
   if(statusEl) statusEl.textContent='アップロード中…';
   try{
     const filePath='logo/logo_'+Date.now()+'.jpg';
-    const {error:upErr}=await sb.storage.from('photos').upload(filePath,blob,{contentType:'image/jpeg',upsert:false});
+    const {error:upErr}=await storageUpload(filePath,blob);
     if(upErr){ if(statusEl) statusEl.textContent='❌ アップロードに失敗しました：'+upErr.message; return; }
-    const {data:urlData}=sb.storage.from('photos').getPublicUrl(filePath);
-    const url=urlData.publicUrl;
+    const url=storageGetUrl(filePath);
     const oldLogoUrl=LOGO_URL;
     const {error:dbErr}=await sb.from('settings').upsert({key:'logo_url',value:url},{onConflict:'key'});
     if(dbErr){ if(statusEl) statusEl.textContent='❌ 設定の保存に失敗しました：'+dbErr.message; return; }
@@ -3010,10 +3043,9 @@ async function confirmUploadInfoImages(){
     try{
       const blob=await resizeImageFile(file,1600,0.85);
       const path=`info/${Date.now()}_${Math.random().toString(36).slice(2,8)}.jpg`;
-      const {error:upErr}=await sb.storage.from('photos').upload(path,blob,{contentType:'image/jpeg',upsert:false});
+      const {error:upErr}=await storageUpload(path,blob);
       if(upErr){ console.error('参考画像アップロードエラー:',upErr); continue; }
-      const {data:urlData}=sb.storage.from('photos').getPublicUrl(path);
-      images.push({id:'img'+Date.now()+Math.random().toString(36).slice(2,6),path,url:urlData.publicUrl,title:titles[i]||''});
+      images.push({id:'img'+Date.now()+Math.random().toString(36).slice(2,6),path,url:storageGetUrl(path),title:titles[i]||''});
     }catch(err){
       console.error('参考画像処理エラー:',err);
     }
@@ -3030,7 +3062,9 @@ async function deleteInfoImage(id){
   await saveInfoImages(images);
   renderInfoImages();
   if(target&&target.path){
-    sb.storage.from('photos').remove([target.path]).catch(e=>console.error('参考画像削除エラー:',e));
+    storageDelete([target.path])
+      .then(({error})=>{ if(error) console.error('参考画像削除エラー:',error.message); })
+      .catch(e=>console.error('参考画像削除エラー:',e));
   }
 }
 async function editInfoImageTitle(id){
@@ -4052,24 +4086,18 @@ async function submitEntry(){
     if(_pendingSubmitPhotoBlob){
       if(_pendingSubmitPhotoBlob.size>10*1024*1024){ showInlineMsg('submitError','画像サイズは10MB以下にしてください'); return; }
       const filePath=newId+'.jpg';
-      const {error:upErr}=await withTimeout(sb.storage.from('photos').upload(filePath, _pendingSubmitPhotoBlob, {
-        contentType: 'image/jpeg', upsert: false
-      }), 15000);
+      const {error:upErr}=await withTimeout(storageUpload(filePath, _pendingSubmitPhotoBlob), 15000);
       if(upErr){ showInlineMsg('submitError','画像のアップロードに失敗しました：'+upErr.message); return; }
-      const {data:urlData}=sb.storage.from('photos').getPublicUrl(filePath);
-      imageUrl=urlData.publicUrl;
+      imageUrl=storageGetUrl(filePath);
 
       // 管理画面一覧表示用の軽量サムネイルも生成してアップロード（失敗しても本体投稿は続行）
       try{
         const thumbBlob=await makeThumbBlob(_pendingSubmitPhotoBlob,360,0.72);
         if(thumbBlob){
           const thumbPath='thumb_'+newId+'.jpg';
-          const {error:thumbUpErr}=await sb.storage.from('photos').upload(thumbPath, thumbBlob, {
-            contentType:'image/jpeg', upsert:false
-          });
+          const {error:thumbUpErr}=await storageUpload(thumbPath, thumbBlob);
           if(!thumbUpErr){
-            const {data:thumbUrlData}=sb.storage.from('photos').getPublicUrl(thumbPath);
-            thumbUrl=thumbUrlData.publicUrl;
+            thumbUrl=storageGetUrl(thumbPath);
           }
         }
       }catch(e){ console.warn('サムネイル生成に失敗（本体投稿は継続）:',e); }
@@ -4262,10 +4290,9 @@ async function uploadRosterPhoto(){
   statusEl.textContent='アップロード中…';
   try{
     const filePath='roster/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
-    const {error:upErr}=await sb.storage.from('photos').upload(filePath,blob,{contentType:'image/jpeg',upsert:false});
+    const {error:upErr}=await storageUpload(filePath,blob);
     if(upErr){ statusEl.textContent='❌ アップロードに失敗しました：'+upErr.message; return; }
-    const {data:urlData}=sb.storage.from('photos').getPublicUrl(filePath);
-    const url=urlData.publicUrl;
+    const url=storageGetUrl(filePath);
     const teams=TEAMS_ROSTER.length>0?TEAMS_ROSTER:getDisplayTeams();
     const team=teams.find(t=>normalizeForMatch(t.name)===normalizeForMatch(teamName));
     if(!team){ statusEl.textContent='❌ チームが見つかりません'; return; }
@@ -4470,10 +4497,9 @@ async function confirmBulkRosterUpload(){
     try{
       const blob=m.customBlob||await resizeImageFileSquare(m.file,800,0.85);
       const filePath='roster/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
-      const {error:upErr}=await sb.storage.from('photos').upload(filePath,blob,{contentType:'image/jpeg',upsert:false});
+      const {error:upErr}=await storageUpload(filePath,blob);
       if(upErr){ failed++; continue; }
-      const {data:urlData}=sb.storage.from('photos').getPublicUrl(filePath);
-      const url=urlData.publicUrl;
+      const url=storageGetUrl(filePath);
       if(m.playerId==='_team_'){
         if(team.teamPhotoUrl) oldUrls.push(team.teamPhotoUrl);
         team.teamPhotoUrl=url;
@@ -5134,7 +5160,7 @@ async function deletePhotoStorageFiles(ids){
   if(!ids||!ids.length) return;
   const paths=ids.flatMap(id=>[id+'.jpg','thumb_'+id+'.jpg']);
   try{
-    const {error}=await sb.storage.from('photos').remove(paths);
+    const {error}=await storageDelete(paths);
     if(error) console.warn('Storage孤児ファイル削除エラー（投稿自体は削除済み）:',error.message);
   } catch(e){ console.warn('Storage孤児ファイル削除で例外（投稿自体は削除済み）:',e); }
 }
@@ -5143,14 +5169,10 @@ async function deletePhotoStorageFiles(ids){
 // ロゴ・選手名簿写真の「差し替え」など、旧ファイルをピンポイントで消したい場面で使う。
 // 失敗しても投稿・保存自体には影響させない（孤児ファイルが1つ残るだけなので握りつぶす）。
 async function deleteStorageFileByUrl(url){
-  if(!url) return;
   try{
-    const marker='/storage/v1/object/public/photos/';
-    const idx=url.indexOf(marker);
-    if(idx===-1) return;
-    const path=decodeURIComponent(url.slice(idx+marker.length));
+    const path=storagePathFromUrl(url);
     if(!path) return;
-    const {error}=await sb.storage.from('photos').remove([path]);
+    const {error}=await storageDelete([path]);
     if(error) console.warn('旧ストレージファイル削除エラー（実害なし）:',error.message);
   }catch(e){ console.warn('旧ストレージファイル削除で例外（実害なし）:',e); }
 }
@@ -5464,11 +5486,10 @@ async function addAlbumPhoto(){
     const newId='alb_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
     const filePath='album/'+newId+'.jpg';
 
-    const {error:upErr}=await sb.storage.from('photos').upload(filePath,blob,{contentType:'image/jpeg',upsert:false});
+    const {error:upErr}=await storageUpload(filePath,blob);
     if(upErr){ statusEl.textContent='❌ アップロード失敗：'+upErr.message; return; }
 
-    const {data:urlData}=sb.storage.from('photos').getPublicUrl(filePath);
-    const imageUrl=urlData.publicUrl;
+    const imageUrl=storageGetUrl(filePath);
 
     const {error:dbErr}=await sb.from('album').insert({
       id:newId, title, caption, image_url:imageUrl,
@@ -6636,9 +6657,13 @@ async function submitTeamRoster(){
   const coaches=(document.getElementById('tiCoaches').value||'').trim();
   const entry={ token:_tiCurrentToken, teamName:team.name, manager, coaches, roster, submittedAt:new Date().toISOString() };
   try{
-    const list=PENDING_ROSTER.filter(p=>p.token!==_tiCurrentToken);
-    list.push(entry);
-    await savePendingRoster(list);
+    // 提出者（監督）は未ログイン（anon）のため、settingsへの直接upsertは
+    // RLS（authenticated限定）で失敗する。SECURITY DEFINER RPC経由で
+    // DB内部でトークン照合のうえroster_pendingを更新する。
+    const {error}=await withTimeout(sb.rpc('submit_team_roster',{p_token:_tiCurrentToken, p_entry:entry}), 10000);
+    if(error) throw error;
+    // ローカル状態も同期（同一端末で管理画面を開いている場合の表示用）
+    PENDING_ROSTER=PENDING_ROSTER.filter(p=>p.token!==_tiCurrentToken).concat([entry]);
     showInlineMsg('tiSuccess','✅ 提出しました。大会事務局の確認後、選手紹介ページに反映されます。');
   }catch(err){
     showInlineMsg('tiError','❌ 送信に失敗しました。電波の良い場所でもう一度お試しください：'+err.message);
