@@ -6638,9 +6638,8 @@ function tiAddRow(data){
     const file=photoInput.files&&photoInput.files[0];
     if(!file) return;
     if(file.size>15*1024*1024){ photoStatus.textContent='❌15MB以下の画像を選んでください'; photoInput.value=''; return; }
-    photoStatus.textContent='圧縮中…';
     try{
-      const blob=await resizeImageFileSquare(file,800,0.85);
+      const blob=await openCropModal(file,1); // 正方形に切り取り（管理画面の個別登録と同じ挙動）
       wrap._tiFields.photoBlob=blob;
       wrap._tiFields.existingPhotoUrl=null; // 新しい写真を選んだので既存URLは無効化
       photoPreview.src=URL.createObjectURL(blob);
@@ -6648,7 +6647,9 @@ function tiAddRow(data){
       photoLabel.textContent='📷 写真を変更する';
       photoStatus.textContent='✅ 準備完了（送信時にアップロードされます）';
     }catch(e){
-      photoStatus.textContent='❌ 画像の処理に失敗しました';
+      // ユーザーが切り取りをキャンセルした場合は何も表示しない（元々未選択の状態に戻す）
+      photoInput.value='';
+      if(e&&e.message!=='cropped_cancelled'){ photoStatus.textContent='❌ 画像の処理に失敗しました'; }
     }
   };
   photoLabel.appendChild(photoInput);
