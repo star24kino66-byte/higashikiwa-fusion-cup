@@ -6321,6 +6321,12 @@ function renderTeamLinkAdmin(){
     countSpan.textContent=(team.roster||[]).length+'名';
     nameSpan.appendChild(countSpan);
     top.appendChild(nameSpan);
+    const editNameBtn=document.createElement('button');
+    editNameBtn.type='button';
+    editNameBtn.style.cssText='flex:0 0 auto;font-size:11px;padding:4px 8px;border:1px solid #ddd;background:#fff;color:#6b7a99;border-radius:6px;cursor:pointer;';
+    editNameBtn.textContent='✏️ 名前変更';
+    editNameBtn.onclick=()=>renameTeamPrompt(team.name);
+    top.appendChild(editNameBtn);
     row.appendChild(top);
 
     const btnRow=document.createElement('div');
@@ -6371,6 +6377,28 @@ async function regenerateTeamLink(teamName){
     await saveTeamsRoster(teams);
     renderTeamLinkAdmin();
   }catch(err){ alert('❌ 再発行に失敗しました：'+err.message); }
+}
+
+// チーム名の変更（事務局側での運用を想定：入力リンク先の監督からは変更不可）。
+// 名簿側の名前だけでなく、過去に投稿された写真・応援メッセージのteam欄（当時の文字列で保存されている）も
+// 連動して更新し、チーム別フィルターの整合性を保つ。
+async function renameTeamPrompt(oldName){
+  const newName=(prompt('新しいチーム名を入力してください',oldName)||'').trim();
+  if(!newName||newName===oldName) return;
+  if(TEAMS_ROSTER.some(t=>t.name===newName)){ alert('❌ 同じ名前のチームがすでにあります。'); return; }
+  if(!confirm('「'+oldName+'」を「'+newName+'」に変更します。\n過去に投稿された写真・応援メッセージのチーム表示も連動して更新されます。\nよろしいですか？')) return;
+  try{
+    const teams=TEAMS_ROSTER.map(t=>t.name===oldName?{...t,name:newName}:t);
+    await saveTeamsRoster(teams);
+    const {error:pErr}=await sb.from('photos').update({team:newName}).eq('team',oldName);
+    if(pErr) console.warn('写真のチーム名連動更新エラー:',pErr.message);
+    const {error:mErr}=await sb.from('messages').update({team:newName}).eq('team',oldName);
+    if(mErr) console.warn('メッセージのチーム名連動更新エラー:',mErr.message);
+    renderAllTeamViews();
+    alert('✅「'+newName+'」に変更しました。');
+  }catch(err){
+    alert('❌ 変更に失敗しました：'+err.message);
+  }
 }
 
 /* ---- 管理画面：③提出された名簿の承認待ち一覧 ---- */
