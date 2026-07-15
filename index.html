@@ -1506,7 +1506,7 @@ img{
     <div id="shareQrCode" style="display:flex;justify-content:center;margin-bottom:.8rem;"></div>
     <div style="display:flex;gap:6px;align-items:center;">
       <input type="text" id="shareModalUrlInput" readonly style="flex:1;min-width:0;font-size:12px;padding:8px;border:1px solid #ddd;border-radius:8px;background:#f7f7f9;color:#444;">
-      <button class="ubtn" style="flex:0 0 auto;padding:8px 12px;" onclick="copyShareableSiteUrlFromModal()">コピー</button>
+      <button class="ubtn" style="flex:0 0 auto;width:auto;padding:8px 12px;" onclick="copyShareableSiteUrlFromModal()">コピー</button>
     </div>
     <div id="shareModalStatus" style="font-size:12px;color:#2d6a4f;margin-top:.5rem;text-align:center;"></div>
   </div>
@@ -5776,6 +5776,7 @@ function renderAlbumAdmin(){
     renderTournamentInfo(getDisplayTournamentInfo());
     renderInfoImages();
     renderAllTeamViews();
+    renderRosterPendingAdmin();
     const adminMain=document.getElementById('adminMainView');
     if(adminMain && adminMain.style.display!=='none'){ renderPeriodAdmin(); }
   });
