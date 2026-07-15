@@ -7088,13 +7088,24 @@ function handleInfoCsvFile(file){
   })();
 }
 
+function formatInfoValue(val){
+  if(val==null) return '';
+  const raw=String(val);
+  const lines=raw.split(/\r\n|\n/).map(l=>l.trim()).filter(l=>l.length>0);
+  if(lines.length<=1) return esc(raw);
+  return lines.map(line=>{
+    const isBullet=/^[・●○◆■※]/.test(line);
+    const style=isBullet?'margin:0 0 6px;padding-left:1.1em;text-indent:-1.1em;':'margin:0 0 6px;';
+    return `<div style="${style}">${esc(line)}</div>`;
+  }).join('');
+}
 function renderTournamentInfo(items){
   const tbody=document.getElementById('tournamentInfoTable');
   if(!tbody) return;
   tbody.innerHTML='';
   items.forEach(item=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td style="padding:7px 4px;border-bottom:1px solid #f0f2f8;color:#888;width:38%;font-size:12px;vertical-align:top;">${esc(item.key)}</td><td style="padding:7px 4px;border-bottom:1px solid #f0f2f8;line-height:1.6;">${esc(item.val)}</td>`;
+    tr.innerHTML=`<td style="padding:7px 4px;border-bottom:1px solid #f0f2f8;color:#888;width:38%;font-size:12px;vertical-align:top;">${esc(item.key)}</td><td style="padding:7px 4px;border-bottom:1px solid #f0f2f8;line-height:1.7;">${formatInfoValue(item.val)}</td>`;
     tbody.appendChild(tr);
   });
   // 最後の行のborder-bottomを消す
