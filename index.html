@@ -543,7 +543,10 @@ img.clickable-photo{cursor:zoom-in;}
 .admin-entry{background:#f0f1f5;border-radius:10px;padding:.7rem 1rem;margin-bottom:.6rem;cursor:pointer;text-align:center;font-size:13px;color:#666;}
 .admin-panel{background:#f0f2f8;overflow-y:auto;padding-bottom:80px;}
 .admin-inner{max-width:700px;margin:0 auto;padding:.8rem .8rem 3rem;}
-.admin-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:1rem;padding:.5rem 0;}
+.admin-header{display:flex;flex-direction:column;gap:8px;margin-bottom:1rem;padding:.5rem 0;}
+.admin-header-top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;}
+.admin-header-actions{display:flex;gap:8px;}
+.admin-header-actions .admin-close{flex:1;}
 .admin-title{font-size:17px;font-weight:700;color:#1a3260;white-space:nowrap;}
 .admin-close{background:#1a3260;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:14px;cursor:pointer;font-weight:600;min-height:44px;white-space:nowrap;}
 /* タブ：グループ見出し付きレイアウト */
@@ -1038,10 +1041,6 @@ img{
   <button class="page-nav-btn" id="navDonationBtn" onclick="switchPage(this,'donation')">💰 寄付・協賛</button>
   <button class="page-nav-btn" onclick="openAdminLogin()">⚙️ 管理</button>
 </nav>
-<div style="text-align:center;margin:-.2rem 0 .6rem;">
-  <button onclick="openShareModal()" style="background:none;border:none;color:#888;font-size:11px;text-decoration:underline;cursor:pointer;padding:4px 8px;">🔗 このサイトを共有（QRコード）</button>
-</div>
-
 <!-- TOP PAGE -->
 <div class="page-view on" id="page-top">
 <div class="wrap" style="padding-top:.4rem;">
@@ -1547,6 +1546,9 @@ img{
     <p style="font-size:12px;color:#666;margin-bottom:.6rem;">パスワード不要で、この端末の見た目だけ好きなテーマに変更できます。</p>
     <div id="themePickMenu"></div>
     <button class="theme-pick-reset" id="themePickResetBtn" onclick="resetThemeLocal()" style="display:none;">サイトのおすすめに戻す</button>
+    <div style="text-align:center;margin-top:.8rem;border-top:1px solid #eee;padding-top:.8rem;">
+      <button onclick="openShareModal()" style="background:none;border:none;color:#888;font-size:11px;text-decoration:underline;cursor:pointer;padding:4px 8px;">🔗 このサイトを共有（QRコード）</button>
+    </div>
   </div>
   <div id="adminLoginView" class="admin-login">
     <h2>🔒 管理者ログイン</h2>
@@ -1558,10 +1560,14 @@ img{
   <div id="adminMainView" style="display:none;">
     <div class="admin-inner">
     <div class="admin-header">
-      <div class="admin-title">📋 管理者画面</div>
-      <span id="realtimeBadge" style="font-size:11px;margin-left:8px;font-weight:bold;">🟡 通信不安定：10秒ごとに自動更新中</span>
-      <button class="admin-close" onclick="adminLogout()" style="margin-right:6px;">🔓 ログアウト</button>
-      <button class="admin-close" onclick="closeAdminPanel()">← トップへ戻る</button>
+      <div class="admin-header-top">
+        <div class="admin-title">📋 管理者画面</div>
+        <span id="realtimeBadge" style="font-size:11px;font-weight:bold;">🟡 通信不安定：10秒ごとに自動更新中</span>
+      </div>
+      <div class="admin-header-actions">
+        <button class="admin-close" onclick="adminLogout()">🔓 ログアウト</button>
+        <button class="admin-close" onclick="closeAdminPanel()">← トップへ戻る</button>
+      </div>
     </div>
     <div class="admin-tabs">
       <div class="admin-tab-group"><span class="admin-tab-group-label">📷 フォトベスト9</span><div class="admin-tab-group-btns"><button class="admin-tab" onclick="switchAdminTab(this,'pendingPhotos')">未承認写真 <span class="pending-count" id="photoCount">0</span></button><button class="admin-tab" onclick="switchAdminTab(this,'approvedPhotos')">承認済写真</button><button class="admin-tab" onclick="switchAdminTab(this,'bestNineAdmin')" style="grid-column:span 2;">🏆 ベスト9選定</button></div></div>
@@ -2070,6 +2076,19 @@ img{
       <div class="fr"><input type="text" id="tiCoaches" placeholder="コーチ名（複数はカンマ区切りでOK）" style="flex:1;font-size:14px;padding:8px;border:1px solid #ddd;border-radius:8px;"></div>
     </div>
     <div class="admin-form-card">
+      <div class="admin-form-title">📷 集合写真</div>
+      <p style="font-size:12px;color:#666;line-height:1.6;margin-bottom:.6rem;">選手紹介ページの最上段に掲載されます（任意）。</p>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <img id="tiTeamPhotoPreview" style="width:64px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #ddd;background:#f5f6fa;display:none;">
+        <label for="tiTeamPhotoInput" style="flex:1;display:flex;align-items:center;gap:8px;background:#f5f6fa;border:1px solid #ddd;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px;color:#555;">
+          <span style="font-size:16px;">📷</span>
+          <span id="tiTeamPhotoLabel">集合写真を選ぶ（任意）</span>
+        </label>
+        <input type="file" id="tiTeamPhotoInput" accept="image/*" style="display:none;" onchange="handleTiTeamPhotoSelect(this)">
+      </div>
+      <div id="tiTeamPhotoStatus" style="font-size:11px;color:#888;"></div>
+    </div>
+    <div class="admin-form-card">
       <div class="admin-form-title">選手名簿</div>
       <p style="font-size:12px;color:#666;line-height:1.6;margin-bottom:.6rem;">氏名だけ入力すれば登録できます。他の項目はわかる範囲で構いません。</p>
       <div id="tiRosterRows"></div>
@@ -2286,6 +2305,8 @@ let _pendingSubmitPhotoBlob=null;
 let _pendingAlbumPhotoBlob=null;
 let _pendingRosterPhotoBlob=null;
 let _pendingLogoBlob=null;
+let _pendingTiTeamPhotoBlob=null; // チーム専用入力ページの集合写真（切り取り済みBlob）
+let _tiExistingTeamPhotoUrl=null; // 同ページ：未変更時に維持する既存の集合写真URL
 
 async function handleSubmitFileSelect(input){
   const label=document.getElementById('submitFileName');
@@ -2328,6 +2349,25 @@ async function handleRosterPhotoFileSelect(input){
     _pendingRosterPhotoBlob=null;
     input.value='';
     label.textContent='③ 写真ファイルを選択する';
+  }
+}
+async function handleTiTeamPhotoSelect(input){
+  const label=document.getElementById('tiTeamPhotoLabel');
+  const statusEl=document.getElementById('tiTeamPhotoStatus');
+  const preview=document.getElementById('tiTeamPhotoPreview');
+  const file=input.files&&input.files[0];
+  if(!file) return;
+  input.value=''; // 同じファイルを選び直しても次回changeが発火するようここでリセット
+  if(file.size>15*1024*1024){ statusEl.textContent='❌15MB以下の画像を選んでください'; return; }
+  try{
+    const blob=await openCropModal(file,4/3); // 集合写真は横長（管理画面の一括登録と同じ比率）
+    _pendingTiTeamPhotoBlob=blob;
+    preview.src=URL.createObjectURL(blob);
+    preview.style.display='block';
+    label.textContent='📷 集合写真を変更する';
+    statusEl.textContent='✅ 準備完了（送信時にアップロードされます）';
+  }catch(e){
+    if(e&&e.message!=='cropped_cancelled'){ statusEl.textContent='❌ 画像の処理に失敗しました'; }
   }
 }
 async function handleLogoFileSelect(input){
@@ -6527,6 +6567,21 @@ function renderRosterPendingAdmin(){
     meta.textContent=(submittedLabel?'提出日時：'+submittedLabel+'　':'')+'監督：'+(sub.manager||'（未入力）')+'　コーチ：'+(sub.coaches||'（未入力）');
     card.appendChild(meta);
 
+    if(sub.teamPhotoUrl){
+      const teamPhotoRow=document.createElement('div');
+      teamPhotoRow.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:.5rem;';
+      const teamPhotoImg=document.createElement('img');
+      teamPhotoImg.src=sub.teamPhotoUrl;
+      teamPhotoImg.loading='lazy';
+      teamPhotoImg.style.cssText='width:72px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #ddd;';
+      const teamPhotoLabelEl=document.createElement('span');
+      teamPhotoLabelEl.style.cssText='font-size:11px;color:#888;';
+      teamPhotoLabelEl.textContent='📷 集合写真（提出あり）';
+      teamPhotoRow.appendChild(teamPhotoImg);
+      teamPhotoRow.appendChild(teamPhotoLabelEl);
+      card.appendChild(teamPhotoRow);
+    }
+
     const tableWrap=document.createElement('div');
     tableWrap.style.cssText='overflow-x:auto;';
     const roster=sub.roster||[];
@@ -6603,7 +6658,8 @@ async function approveRosterSubmission(token){
         ...t,
         manager:sub.manager||t.manager||'',
         coaches:sub.coaches||t.coaches||'',
-        roster:newRoster
+        roster:newRoster,
+        teamPhotoUrl:sub.teamPhotoUrl||t.teamPhotoUrl // 今回の提出に集合写真がなければ既存を維持
       };
     });
     await saveTeamsRoster(teams);
@@ -6693,6 +6749,21 @@ function showTeamInputPage(token){
     noticeEl.style.display='none';
   }
   const sourceRoster=(pending?pending.roster:team.roster)||[];
+  _pendingTiTeamPhotoBlob=null;
+  _tiExistingTeamPhotoUrl=(pending?pending.teamPhotoUrl:undefined)||team.teamPhotoUrl||null;
+  const tiTeamPhotoPreview=document.getElementById('tiTeamPhotoPreview');
+  const tiTeamPhotoLabel=document.getElementById('tiTeamPhotoLabel');
+  const tiTeamPhotoStatus=document.getElementById('tiTeamPhotoStatus');
+  const tiTeamPhotoInput=document.getElementById('tiTeamPhotoInput');
+  if(tiTeamPhotoInput) tiTeamPhotoInput.value='';
+  if(tiTeamPhotoStatus) tiTeamPhotoStatus.textContent='';
+  if(_tiExistingTeamPhotoUrl){
+    if(tiTeamPhotoPreview){ tiTeamPhotoPreview.src=_tiExistingTeamPhotoUrl; tiTeamPhotoPreview.style.display='block'; }
+    if(tiTeamPhotoLabel) tiTeamPhotoLabel.textContent='📷 集合写真を変更する';
+  }else{
+    if(tiTeamPhotoPreview){ tiTeamPhotoPreview.style.display='none'; tiTeamPhotoPreview.removeAttribute('src'); }
+    if(tiTeamPhotoLabel) tiTeamPhotoLabel.textContent='集合写真を選ぶ（任意）';
+  }
   const rowsEl=document.getElementById('tiRosterRows');
   rowsEl.innerHTML='';
   _tiRowSeq=0;
@@ -6775,7 +6846,8 @@ function tiAddRow(data){
   photoInput.onchange=async()=>{
     const file=photoInput.files&&photoInput.files[0];
     if(!file) return;
-    if(file.size>15*1024*1024){ photoStatus.textContent='❌15MB以下の画像を選んでください'; photoInput.value=''; return; }
+    photoInput.value=''; // 同じファイルを選び直した場合でも次回のchangeイベントが発火するようここでリセット
+    if(file.size>15*1024*1024){ photoStatus.textContent='❌15MB以下の画像を選んでください'; return; }
     try{
       const blob=await openCropModal(file,1); // 正方形に切り取り（管理画面の個別登録と同じ挙動）
       wrap._tiFields.photoBlob=blob;
@@ -6841,6 +6913,16 @@ async function submitTeamRoster(){
   const btn=document.querySelector('button[onclick="submitTeamRoster()"]');
   if(btn){ btn.disabled=true; }
   try{
+    // 集合写真：新しく選ばれていればここでアップロード、未変更なら既存URLをそのまま維持
+    let teamPhotoUrl=_tiExistingTeamPhotoUrl||undefined;
+    if(_pendingTiTeamPhotoBlob){
+      showInlineMsg('tiSuccess','集合写真をアップロード中…');
+      const path='roster/'+_tiCurrentToken+'_team_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
+      try{
+        const {error:upErr}=await withTimeout(storageUpload(path, _pendingTiTeamPhotoBlob), 15000);
+        if(!upErr){ teamPhotoUrl=storageGetUrl(path); }
+      }catch(e){ /* 集合写真の失敗は名簿送信自体は止めない（既存写真のまま提出） */ }
+    }
     // 写真はここでまとめてStorageにアップロード（選択時点で圧縮済みのblobを使用）
     if(photoJobs.length>0){
       showInlineMsg('tiSuccess','写真をアップロード中…（'+photoJobs.length+'枚）');
@@ -6853,7 +6935,7 @@ async function submitTeamRoster(){
         }catch(e){ /* 1枚の失敗で全体を止めない。その選手だけ写真なしで提出される */ }
       }
     }
-    const entry={ token:_tiCurrentToken, teamName:team.name, manager, coaches, roster, submittedAt:new Date().toISOString() };
+    const entry={ token:_tiCurrentToken, teamName:team.name, manager, coaches, roster, teamPhotoUrl, submittedAt:new Date().toISOString() };
     // 提出者（監督）は未ログイン（anon）のため、settingsへの直接upsertは
     // RLS（authenticated限定）で失敗する。SECURITY DEFINER RPC経由で
     // DB内部でトークン照合のうえroster_pendingを更新する。
