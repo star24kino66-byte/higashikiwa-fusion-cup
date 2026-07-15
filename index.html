@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Press+Start+2P&display=swap" rel="stylesheet">
 <script>
@@ -1037,6 +1038,9 @@ img{
   <button class="page-nav-btn" id="navDonationBtn" onclick="switchPage(this,'donation')">💰 寄付・協賛</button>
   <button class="page-nav-btn" onclick="openAdminLogin()">⚙️ 管理</button>
 </nav>
+<div style="text-align:center;margin:-.2rem 0 .6rem;">
+  <button onclick="openShareModal()" style="background:none;border:none;color:#888;font-size:11px;text-decoration:underline;cursor:pointer;padding:4px 8px;">🔗 このサイトを共有（QRコード）</button>
+</div>
 
 <!-- TOP PAGE -->
 <div class="page-view on" id="page-top">
@@ -1494,6 +1498,21 @@ img{
 </div>
 </div><!-- /page-info -->
 
+<!-- SHARE MODAL（誰でもアクセス可能：共有用リンク＋QRコード） -->
+<div class="modal-overlay" id="shareModalOverlay" onclick="if(event.target===this)closeShareModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeShareModal()">✕</button>
+    <div class="modal-title">🔗 このサイトを共有</div>
+    <p style="font-size:12px;color:#666;margin:0 0 .8rem;">QRコードを読み取るか、下のリンクをコピーして共有してください。</p>
+    <div id="shareQrCode" style="display:flex;justify-content:center;margin-bottom:.8rem;"></div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <input type="text" id="shareModalUrlInput" readonly style="flex:1;min-width:0;font-size:12px;padding:8px;border:1px solid #ddd;border-radius:8px;background:#f7f7f9;color:#444;">
+      <button class="ubtn" style="flex:0 0 auto;padding:8px 12px;" onclick="copyShareableSiteUrlFromModal()">コピー</button>
+    </div>
+    <div id="shareModalStatus" style="font-size:12px;color:#2d6a4f;margin-top:.5rem;text-align:center;"></div>
+  </div>
+</div>
+
 <!-- MODAL -->
 <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
   <div class="modal-box">
@@ -1928,6 +1947,13 @@ img{
         </div>
         <button class="ubtn" onclick="updateSiteName()">保存する</button>
         <div id="siteNameStatus" style="font-size:12px;color:#666;margin-top:.4rem;"></div>
+        <div style="margin-top:.8rem;padding-top:.8rem;border-top:1px solid #eee;">
+          <div style="font-size:12px;color:#666;margin-bottom:.4rem;">
+            🔗 このサイトを人に共有するときは、以下のリンクを使ってください（LINE等でのプレビュー画像・タイトルが正しく表示されます）。
+          </div>
+          <button class="ubtn" style="background:#2d6a4f;" onclick="copyShareableSiteUrl()">📋 共有用リンクをコピー</button>
+          <div id="shareUrlStatus" style="font-size:12px;color:#2d6a4f;margin-top:.4rem;"></div>
+        </div>
       </div>
 
       <div class="admin-form-card">
@@ -2638,6 +2664,7 @@ async function saveSiteName(teamName,tournamentTitle,eventDate,eventVenue,heroSu
   const value=JSON.stringify({teamName,tournamentTitle,eventDate,eventVenue,heroSubtitle});
   const {error}=await sb.from('settings').upsert({key:'site_name',value},{onConflict:'key'});
   if(error){ console.error('site_name保存エラー:',error); throw error; }
+  await bumpOgVersion(); // 共有URLのキャッシュ対策バージョンを更新
   SITE_TEAM_NAME=teamName;
   SITE_TOURNAMENT_TITLE=tournamentTitle;
   SITE_EVENT_DATE=eventDate;
@@ -2685,6 +2712,62 @@ function applySiteName(){
    未設定時はHTML埋め込みのデフォルトロゴ（base64）を表示
    ========================================================= */
 let LOGO_URL='';
+// 大会名・ロゴ等、SNS共有プレビュー（OGP）に影響する情報が更新されるたびに+1する。
+// 共有用URLの末尾に ?v=この値 を付けることで、LINE等のリンクプレビューキャッシュを
+// 意図的に無効化する（同じURLの再クロールをキャッシュ機構がスキップしてしまう問題への対策）。
+let OG_VERSION=1;
+async function bumpOgVersion(){
+  const next=OG_VERSION+1;
+  const {error}=await sb.from('settings').upsert({key:'og_version',value:String(next)},{onConflict:'key'});
+  if(!error) OG_VERSION=next;
+  else console.warn('og_versionの更新に失敗（共有リンクの表示上のみ影響、実害なし）:',error.message);
+}
+async function copyShareableSiteUrl(){
+  const url=getShareableSiteUrl();
+  const statusEl=document.getElementById('shareUrlStatus');
+  try{
+    await navigator.clipboard.writeText(url);
+    if(statusEl){ statusEl.textContent='✅ コピーしました：'+url; setTimeout(()=>{statusEl.textContent='';},5000); }
+  }catch(e){
+    if(statusEl) statusEl.textContent='⚠️ 自動コピーに失敗しました。こちらを手動でコピーしてください：'+url;
+  }
+}
+function getShareableSiteUrl(){
+  return location.origin+location.pathname+'?v='+OG_VERSION;
+}
+let _shareQrInstance=null;
+function openShareModal(){
+  const url=getShareableSiteUrl();
+  const input=document.getElementById('shareModalUrlInput');
+  if(input) input.value=url;
+  const qrBox=document.getElementById('shareQrCode');
+  if(qrBox){
+    qrBox.innerHTML='';
+    try{
+      _shareQrInstance=new QRCode(qrBox,{text:url,width:180,height:180,colorDark:'#1a3260',colorLight:'#ffffff'});
+    }catch(e){
+      qrBox.innerHTML='<p style="font-size:12px;color:#c0392b;">QRコードの表示に失敗しました（リンクは下からコピーできます）</p>';
+    }
+  }
+  const statusEl=document.getElementById('shareModalStatus');
+  if(statusEl) statusEl.textContent='';
+  document.getElementById('shareModalOverlay').classList.add('open');
+}
+function closeShareModal(){
+  document.getElementById('shareModalOverlay').classList.remove('open');
+}
+async function copyShareableSiteUrlFromModal(){
+  const url=getShareableSiteUrl();
+  const statusEl=document.getElementById('shareModalStatus');
+  try{
+    await navigator.clipboard.writeText(url);
+    if(statusEl){ statusEl.textContent='✅ コピーしました'; setTimeout(()=>{statusEl.textContent='';},4000); }
+  }catch(e){
+    const input=document.getElementById('shareModalUrlInput');
+    if(input){ input.select(); input.setSelectionRange(0,99999); }
+    if(statusEl) statusEl.textContent='⚠️ 自動コピーできませんでした。上のリンクを長押しして手動でコピーしてください。';
+  }
+}
 // ちらつき防止：前回表示したロゴをキャッシュから即座に反映（Supabase読み込み完了を待たない）
 (function(){
   try{
@@ -2720,6 +2803,7 @@ async function uploadSiteLogo(){
     const {error:dbErr}=await sb.from('settings').upsert({key:'logo_url',value:url},{onConflict:'key'});
     if(dbErr){ if(statusEl) statusEl.textContent='❌ 設定の保存に失敗しました：'+dbErr.message; return; }
     LOGO_URL=url;
+    await bumpOgVersion(); // 共有URLのキャッシュ対策バージョンを更新
     applyLogo();
     if(oldLogoUrl) deleteStorageFileByUrl(oldLogoUrl); // 差し替え前の旧ロゴファイルを削除
     if(statusEl){
@@ -2889,7 +2973,7 @@ async function downloadTeamsRosterCurrent(){
     if(i>0) aoa.push([]);
     aoa.push([t.name,t.manager||'',t.coaches||'',t.isHost?'自チーム':'対戦チーム']);
     (t.roster||[]).forEach(p=>{
-      aoa.push([p.num||'',p.grade||'',p.name||'',p.batThrow||'',p.pos||'',p.dream||'',p.captain||'',p.id||'']);
+      aoa.push([p.num||'',p.grade||'',p.name||'',p.batThrow||'',p.pos||'',p.dream||'',p.captain?'主将':'',p.id||'']);
     });
   });
   const ws=XLSX.utils.aoa_to_sheet(aoa);
@@ -5968,6 +6052,10 @@ async function loadSettingsFromSupabase(){
     if(row.key==='logo_url' && row.value){
       LOGO_URL=row.value;
     }
+    if(row.key==='og_version' && row.value){
+      const n=parseInt(row.value,10);
+      if(!isNaN(n)) OG_VERSION=n;
+    }
     if(row.key==='site_theme' && row.value){
       SITE_THEME=row.value;
     }
@@ -6456,7 +6544,7 @@ function renderRosterPendingAdmin(){
         const tr=document.createElement('tr');
         tr.style.borderTop='1px solid #eee';
         const photoCell=p.photoUrl?`<img src="${esc(p.photoUrl)}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;" loading="lazy">`:'－';
-        tr.innerHTML=`<td style="padding:4px 6px;">${photoCell}</td><td style="padding:4px 6px;">${esc(p.num)}</td><td style="padding:4px 6px;">${esc(p.grade)}</td><td style="padding:4px 6px;font-weight:600;">${esc(p.name)}</td><td style="padding:4px 6px;">${esc(p.batThrow)}</td><td style="padding:4px 6px;">${esc(p.pos)}</td><td style="padding:4px 6px;">${esc(p.captain)}</td>`;
+        tr.innerHTML=`<td style="padding:4px 6px;">${photoCell}</td><td style="padding:4px 6px;">${esc(p.num)}</td><td style="padding:4px 6px;">${esc(p.grade)}</td><td style="padding:4px 6px;font-weight:600;">${esc(p.name)}</td><td style="padding:4px 6px;">${esc(p.batThrow)}</td><td style="padding:4px 6px;">${esc(p.pos)}</td><td style="padding:4px 6px;">${p.captain?'主将':''}</td>`;
         tbody.appendChild(tr);
       });
       table.appendChild(tbody);
@@ -6545,7 +6633,7 @@ function downloadPendingRosterCSV(){
     try{ submittedLabel=sub.submittedAt?new Date(sub.submittedAt).toLocaleString('ja-JP'):''; }catch(e){}
     const roster=sub.roster&&sub.roster.length>0?sub.roster:[{}];
     roster.forEach(p=>{
-      rows.push([sub.teamName||'',submittedLabel,sub.manager||'',sub.coaches||'',p.num||'',p.grade||'',p.name||'',p.batThrow||'',p.pos||'',p.dream||'',p.captain||'']);
+      rows.push([sub.teamName||'',submittedLabel,sub.manager||'',sub.coaches||'',p.num||'',p.grade||'',p.name||'',p.batThrow||'',p.pos||'',p.dream||'',p.captain?'主将':'']);
     });
   });
   const csvBody=rows.map(r=>r.map(csvEscapeCell).join(',')).join('\r\n');
@@ -6648,7 +6736,22 @@ function tiAddRow(data){
   const nameInput=makeField('氏名（必須）','','例：田中一郎',true);
   const batThrowInput=makeField('打/投','','例：右投右打');
   const posInput=makeField('守備','','例：投手');
-  const captainInput=makeField('キャプテン','','例：◎（空欄可）');
+
+  // キャプテンはON/OFFのチェックボックス（以前は自由入力欄で表記がバラつく問題があったため統一）
+  const captainBox=document.createElement('div');
+  const captainLabel=document.createElement('label');
+  captainLabel.style.cssText='display:flex;align-items:center;gap:6px;font-size:13px;color:#444;cursor:pointer;padding:7px 0;';
+  const captainCheckbox=document.createElement('input');
+  captainCheckbox.type='checkbox';
+  captainCheckbox.style.cssText='width:18px;height:18px;';
+  captainLabel.appendChild(captainCheckbox);
+  captainLabel.appendChild(document.createTextNode('主将（キャプテン）'));
+  captainBox.appendChild(captainLabel);
+  grid.appendChild(captainBox);
+  const captainInput={ // 他の入力欄（.value）と同じインターフェースに揃えるための簡易ラッパー
+    get value(){ return captainCheckbox.checked?'主将':''; },
+    set value(v){ captainCheckbox.checked=!!(v&&String(v).trim()); }
+  };
   const dreamInput=makeField('将来の夢','','例：プロ野球選手',true);
 
   numInput.value=data.num||''; gradeInput.value=data.grade||''; nameInput.value=data.name||'';
@@ -6859,7 +6962,7 @@ function renderTeamPlayerCards(teamName){
         <img class="photo" src="${p.photoUrl?esc(p.photoUrl):PLACEHOLDER_IMG}" alt="${esc(p.name)}" loading="lazy" decoding="async">
       </div>
       <div class="body">
-        <div class="name">${esc(p.name)}${p.captain?`<span class="captain-badge">${esc(p.captain)}</span>`:''}</div>
+        <div class="name">${esc(p.name)}${p.captain?`<span class="captain-badge">主将</span>`:''}</div>
         ${posLine?`<div class="pos-line">${posLine}</div>`:''}
         ${p.dream?`<div class="dream-label">将来の夢</div><div class="dream">${esc(p.dream)}</div>`:''}
         ${msgsHtml}
