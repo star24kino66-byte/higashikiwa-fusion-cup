@@ -6666,6 +6666,14 @@ async function approveRosterSubmission(token){
     await saveTeamsRoster(teams);
     await savePendingRoster(PENDING_ROSTER.filter(p=>p.token!==token));
     renderAllTeamViews();
+    // 承認によって公開データが更新されたので、旧チームデータだけが使っていた写真
+    // （新しいデータに引き継がれなかったもの）はここで安全に削除できる
+    const newTeam=teams.find(t=>t.editToken===token);
+    const newUrls=new Set((newTeam&&newTeam.roster||[]).map(p=>p.photoUrl).filter(Boolean));
+    if(newTeam&&newTeam.teamPhotoUrl) newUrls.add(newTeam.teamPhotoUrl);
+    const oldUrls=(oldTeam.roster||[]).map(p=>p.photoUrl).filter(Boolean);
+    if(oldTeam.teamPhotoUrl) oldUrls.push(oldTeam.teamPhotoUrl);
+    oldUrls.forEach(u=>{ if(!newUrls.has(u)) deleteStorageFileByUrl(u); });
     if(statusEl) statusEl.textContent='✅「'+(sub.teamName||oldTeam.name)+'」の選手名簿を公開しました。';
   }catch(err){
     if(statusEl) statusEl.textContent='❌ 反映に失敗しました：'+err.message;
@@ -6675,8 +6683,18 @@ async function approveRosterSubmission(token){
 async function rejectRosterSubmission(token){
   if(!confirm('この提出内容を却下します。チーム側は同じリンクから再提出できます。よろしいですか？')) return;
   try{
+    const sub=findPendingByToken(token);
     await savePendingRoster(PENDING_ROSTER.filter(p=>p.token!==token));
     renderRosterPendingAdmin();
+    // 却下された提出だけが持っていた写真（現行の公開ロスターには存在しないもの）を孤児化させずに削除
+    if(sub){
+      const liveTeam=TEAMS_ROSTER.find(t=>t.editToken===token);
+      const liveUrls=new Set((liveTeam?liveTeam.roster||[]:[]).map(p=>p.photoUrl).filter(Boolean));
+      if(liveTeam&&liveTeam.teamPhotoUrl) liveUrls.add(liveTeam.teamPhotoUrl);
+      const subUrls=(sub.roster||[]).map(p=>p.photoUrl).filter(Boolean);
+      if(sub.teamPhotoUrl) subUrls.push(sub.teamPhotoUrl);
+      subUrls.forEach(u=>{ if(!liveUrls.has(u)) deleteStorageFileByUrl(u); });
+    }
   }catch(err){ alert('❌ 却下処理に失敗しました：'+err.message); }
 }
 
@@ -6713,6 +6731,7 @@ function csvEscapeCell(v){
 /* ---- チーム専用入力ページ（?roster=トークン） ---- */
 let _tiCurrentToken=null;
 let _tiRowSeq=0;
+let _tiRemovedPhotoUrls=[]; // フォーム上で「選手を削除」した行が持っていた写真URL（送信成功後にまとめて孤児削除）
 
 function checkTeamTokenAccess(){
   let token='';
@@ -6751,6 +6770,7 @@ function showTeamInputPage(token){
   }
   const sourceRoster=(pending?pending.roster:team.roster)||[];
   _pendingTiTeamPhotoBlob=null;
+  _tiRemovedPhotoUrls=[];
   _tiExistingTeamPhotoUrl=(pending?pending.teamPhotoUrl:undefined)||team.teamPhotoUrl||null;
   const tiTeamPhotoPreview=document.getElementById('tiTeamPhotoPreview');
   const tiTeamPhotoLabel=document.getElementById('tiTeamPhotoLabel');
@@ -6875,7 +6895,10 @@ function tiAddRow(data){
   delBtn.type='button';
   delBtn.textContent='✕ この選手を削除';
   delBtn.style.cssText='font-size:11px;color:#c8273c;background:none;border:none;cursor:pointer;padding:2px 0;';
-  delBtn.onclick=()=>wrap.remove();
+  delBtn.onclick=()=>{
+    if(wrap._tiFields&&wrap._tiFields.existingPhotoUrl){ _tiRemovedPhotoUrls.push(wrap._tiFields.existingPhotoUrl); }
+    wrap.remove();
+  };
   wrap.appendChild(delBtn);
 
   rowsEl.appendChild(wrap);
@@ -6889,7 +6912,7 @@ async function submitTeamRoster(){
   if(!team){ showInlineMsg('tiError','エラーが発生しました。ページを再読み込みしてください。'); return; }
   const rowsEl=document.getElementById('tiRosterRows');
   const roster=[];
-  const photoJobs=[]; // {rosterIndex, blob} 送信直前にまとめてアップロードする
+  const photoJobs=[]; // {rosterIndex, blob, oldUrl} 送信直前にまとめてアップロードする
   let hasBlankNameRow=false;
   Array.from(rowsEl.children).forEach(wrap=>{
     const f=wrap._tiFields;
@@ -6904,7 +6927,7 @@ async function submitTeamRoster(){
       captain:(f.captain.value||'').trim(), dream:(f.dream.value||'').trim(),
       photoUrl:f.existingPhotoUrl||undefined // 写真を変更していない場合は既存URLを維持
     };
-    if(f.photoBlob){ photoJobs.push({rosterIndex, blob:f.photoBlob}); }
+    if(f.photoBlob){ photoJobs.push({rosterIndex, blob:f.photoBlob, oldUrl:f.existingPhotoUrl||null}); }
     roster.push(rosterItem);
   });
   if(hasBlankNameRow){ showInlineMsg('tiError','氏名が未入力の行があります。氏名を入力するか、その行を削除してください。'); return; }
@@ -6914,6 +6937,7 @@ async function submitTeamRoster(){
   const btn=document.querySelector('button[onclick="submitTeamRoster()"]');
   if(btn){ btn.disabled=true; }
   try{
+    const oldUrlsToDelete=[]; // アップロード成功後にまとめて削除する旧ファイルURL
     // 集合写真：新しく選ばれていればここでアップロード、未変更なら既存URLをそのまま維持
     let teamPhotoUrl=_tiExistingTeamPhotoUrl||undefined;
     if(_pendingTiTeamPhotoBlob){
@@ -6921,7 +6945,10 @@ async function submitTeamRoster(){
       const path='roster/'+_tiCurrentToken+'_team_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
       try{
         const {error:upErr}=await withTimeout(storageUpload(path, _pendingTiTeamPhotoBlob), 15000);
-        if(!upErr){ teamPhotoUrl=storageGetUrl(path); }
+        if(!upErr){
+          teamPhotoUrl=storageGetUrl(path);
+          if(_tiExistingTeamPhotoUrl) oldUrlsToDelete.push(_tiExistingTeamPhotoUrl);
+        }
       }catch(e){ /* 集合写真の失敗は名簿送信自体は止めない（既存写真のまま提出） */ }
     }
     // 写真はここでまとめてStorageにアップロード（選択時点で圧縮済みのblobを使用）
@@ -6932,7 +6959,10 @@ async function submitTeamRoster(){
         const path='roster/'+_tiCurrentToken+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
         try{
           const {error:upErr}=await withTimeout(storageUpload(path, job.blob), 15000);
-          if(!upErr){ roster[job.rosterIndex].photoUrl=storageGetUrl(path); }
+          if(!upErr){
+            roster[job.rosterIndex].photoUrl=storageGetUrl(path);
+            if(job.oldUrl) oldUrlsToDelete.push(job.oldUrl);
+          }
         }catch(e){ /* 1枚の失敗で全体を止めない。その選手だけ写真なしで提出される */ }
       }
     }
@@ -6944,6 +6974,15 @@ async function submitTeamRoster(){
     if(error) throw error;
     // ローカル状態も同期（同一端末で管理画面を開いている場合の表示用）
     PENDING_ROSTER=PENDING_ROSTER.filter(p=>p.token!==_tiCurrentToken).concat([entry]);
+    // 提出が確定してから、差し替え・削除で不要になった旧ファイルを孤児化させずに削除する。
+    // ただし「現在公開中（承認済み）の写真」はここではまだ消さない
+    // （このチェック時点でteamはfindTeamByTokenで取得した公開中データそのもの。
+    //   承認前に消すとサイトの表示が壊れるため、承認/却下のタイミングまで温存する）。
+    const liveUrls=new Set((team.roster||[]).map(p=>p.photoUrl).filter(Boolean));
+    if(team.teamPhotoUrl) liveUrls.add(team.teamPhotoUrl);
+    const urlsToClean=oldUrlsToDelete.concat(_tiRemovedPhotoUrls).filter(u=>!liveUrls.has(u));
+    _tiRemovedPhotoUrls=[];
+    urlsToClean.forEach(u=>{ deleteStorageFileByUrl(u); });
     showInlineMsg('tiSuccess','✅ 提出しました。大会事務局の確認後、選手紹介ページに反映されます。');
   }catch(err){
     showInlineMsg('tiError','❌ 送信に失敗しました。電波の良い場所でもう一度お試しください：'+err.message);
