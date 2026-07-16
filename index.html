@@ -103,9 +103,15 @@ async function storageUpload(path, blob, options){
 async function storageDelete(paths){
   if(!paths||!paths.length) return {data:[], error:null};
   try{
-    const results=await Promise.all(paths.map(p=>
+    const r2Promise=Promise.all(paths.map(p=>
       fetch(STORAGE_WORKER_URL+'/'+p, {method:'DELETE'}).then(res=>({path:p, ok:res.ok}))
     ));
+    // 旧Supabase Storageにまだ実体が残っている過去データも対象に削除を試みる（ベストエフォート）。
+    // R2の削除は存在しないキーに対してもok:trueを返す（冪等な仕様）ため、R2側の結果だけでは
+    // 「旧データがSupabase Storageに残っている」ケースを検知できない。そのため常に両方を叩く。
+    // R2にしか無い新データに対しては、この呼び出しは単に対象が無いだけで無害。
+    const legacyPromise=sb.storage.from(SUPABASE_LEGACY_BUCKET).remove(paths).catch(()=>null);
+    const [results]=await Promise.all([r2Promise, legacyPromise]);
     const failed=results.filter(r=>!r.ok);
     if(failed.length){
       return {data:results, error:{message:failed.length+'件の削除に失敗しました'}};
