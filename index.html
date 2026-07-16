@@ -108,6 +108,22 @@ function toStoragePath(value){
   if(/^https?:\/\//.test(value)) return storagePathFromUrl(value); // 既存データはURLから逆算
   return value; // 新データは既にパスそのもの
 }
+// 2026/7/16〜：サムネイル画像の読み込み失敗時に、少し間を空けて自動で再読み込みする。
+// 投稿直後（R2への書き込みが完了した直後）に承認画面等で即座にサムネイルを表示しようとすると、
+// ごく短い伝播ラグに当たって「壊れた画像」に見えることがあるため、その一時的な失敗を吸収する。
+// <img onerror="imgRetry(this)">として使う。最大3回、間隔を空けてリトライし、それでも
+// 失敗する場合は諦めて壊れたアイコンのまま（＝一時的な問題ではなく実体が無い等の可能性）。
+function imgRetry(el){
+  const n=parseInt(el.dataset.retryN||'0',10);
+  const delays=[600,1500,3000];
+  if(n>=delays.length) return;
+  el.dataset.retryN=String(n+1);
+  if(!el.dataset.origSrc) el.dataset.origSrc=el.src;
+  const base=el.dataset.origSrc;
+  setTimeout(()=>{
+    el.src=base+(base.indexOf('?')>-1?'&':'?')+'_retry='+Date.now();
+  }, delays[n]);
+}
 // 2026/7/16〜：画像はWebP優先で保存（対応ブラウザではJPEGよりファイルサイズを削減）。
 // canvasからBlobを生成する箇所は必ずこれを経由する。WebPエンコード非対応のブラウザでは
 // canvas.toBlob(...,'image/webp',...)が黙ってPNG等にフォールバックすることがあるため、
@@ -3458,7 +3474,7 @@ function renderBest9Grid(){
     card.className='best9-pub-card'+(isDummy?'':' has-photo');
     const photoThumbSrc=(photo.thumbSmall&&(photo.thumbSmall.startsWith('data:')||photo.thumbSmall.startsWith('http')))?photo.thumbSmall:photo.thumb;
     const imgHtml=(photoThumbSrc&&(photoThumbSrc.startsWith('data:')||photoThumbSrc.startsWith('http')))
-      ?`<img src="${photoThumbSrc}" data-full="${photo.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)">`
+      ?`<img src="${photoThumbSrc}" data-full="${photo.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`
       :`<div class="best9-pub-emoji">${photo.e||'📷'}</div>`;
     // 賞名が長い場合（例：ベストショット賞）はバッジのフォントを一段小さくして1行に収める
     const badgeLongCls=(catName&&catName.length>=7)?' badge-long':'';
@@ -3487,7 +3503,7 @@ function renderBest9Grid(){
     card.className='best9-pub-card best9-like-card'+(isDummy?'':' has-photo');
     const pThumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb;
     const imgHtml=(pThumbSrc&&(pThumbSrc.startsWith('data:')||pThumbSrc.startsWith('http')))
-      ?`<img src="${pThumbSrc}" data-full="${p.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)">`
+      ?`<img src="${pThumbSrc}" data-full="${p.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`
       :`<div class="best9-pub-emoji">${thumbHtml(p.e||'📷','60px')}</div>`;
     card.innerHTML=`
       <div class="best9-pub-badge like-badge">${likeMedals[i]} ${i+1}位</div>
@@ -3991,7 +4007,7 @@ function renderPhotoModalList(keepPage){
     const bestBadge=p.isBest?`<div class="best-badge">🏆 ${esc(catLabel[p.cat]||p.cat)} 受賞</div>`:'';
     const modalThumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.e;
     const imgHtml=(modalThumbSrc&&(modalThumbSrc.startsWith('data:')||modalThumbSrc.startsWith('http')))
-      ?`<img src="${modalThumbSrc}" data-full="${p.thumb||p.e||''}" class="photo-modal-card-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)">`
+      ?`<img src="${modalThumbSrc}" data-full="${p.thumb||p.e||''}" class="photo-modal-card-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`
       :`<div class="photo-modal-card-emoji">${p.e||'📷'}</div>`;
     html+=`<div class="photo-modal-card${p.isBest?' is-best':''}">
       ${bestBadge}
@@ -4928,7 +4944,7 @@ function renderPendingPhotoList(){
   pageItems.forEach((p,idx)=>{
     const no=photoLabel(p.seqNo);
     const thumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb;
-    const thumb=(thumbSrc&&(thumbSrc.startsWith('data:')||thumbSrc.startsWith('http')))?`<img src="${esc(thumbSrc)}" data-full="${esc(p.thumb||'')}" onclick="openLightbox(this.dataset.full||this.src)">`:'<span class="p-noimg">📷</span>';
+    const thumb=(thumbSrc&&(thumbSrc.startsWith('data:')||thumbSrc.startsWith('http')))?`<img src="${esc(thumbSrc)}" data-full="${esc(p.thumb||'')}" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`:'<span class="p-noimg">📷</span>';
     const dt=p.submittedAt?new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
     html+=`<tr>
       <td class="p-check"><input type="checkbox" class="photo-check" data-id="${esc(p._id)}"></td>
@@ -5132,7 +5148,7 @@ function renderApprovedPhotoList(){
     const no=photoLabel(p.seqNo);
     const isBest=bestShots[p.cat]===p._id;
     const thumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb;
-    const thumb=(thumbSrc&&(thumbSrc.startsWith('data:')||thumbSrc.startsWith('http')))?`<img src="${esc(thumbSrc)}" data-full="${esc(p.thumb||'')}" onclick="openLightbox(this.dataset.full||this.src)">`:'<span class="p-noimg">📷</span>';
+    const thumb=(thumbSrc&&(thumbSrc.startsWith('data:')||thumbSrc.startsWith('http')))?`<img src="${esc(thumbSrc)}" data-full="${esc(p.thumb||'')}" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`:'<span class="p-noimg">📷</span>';
     html+=`<tr class="${isBest?'is-best':''}">
       <td class="p-to">${no?`<span class="row-no">${no}</span>`:''}${esc(p.team||'')}</td>
       <td class="p-from">${esc(p.author||'-')}</td>
@@ -5202,7 +5218,7 @@ function renderBestNineAdmin(keepPage){
   pageItems.forEach(p=>{
     const isBest=p._id===bestId;
     const b9ThumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb;
-    gridHtml+=`<div class="best9-photo-card${isBest?' is-best':''}" data-cat="${esc(catKey)}" data-pid="${esc(p._id)}" onclick="setBestShot(this.dataset.cat,this.dataset.pid)"><div class="best9-photo-wrap">${(b9ThumbSrc&&(b9ThumbSrc.startsWith('data:')||b9ThumbSrc.startsWith('http')))?`<img src="${esc(b9ThumbSrc)}" data-full="${esc(p.thumb||'')}" class="best9-thumb" onclick="event.stopPropagation();openLightbox(this.dataset.full||this.src)">`:'<div class="best9-thumb-placeholder">📷</div>'}</div><div class="best9-photo-info"><div class="best9-photo-name">${esc(p.n||'無題')}</div><div class="best9-photo-meta">チーム：${esc(p.team||'不明')} ／ 👍${p.l||0}</div></div>${isBest?'<div class="best9-crown">🏆 選定中</div>':'<div class="best9-select-hint">タップで選定</div>'}</div>`;
+    gridHtml+=`<div class="best9-photo-card${isBest?' is-best':''}" data-cat="${esc(catKey)}" data-pid="${esc(p._id)}" onclick="setBestShot(this.dataset.cat,this.dataset.pid)"><div class="best9-photo-wrap">${(b9ThumbSrc&&(b9ThumbSrc.startsWith('data:')||b9ThumbSrc.startsWith('http')))?`<img src="${esc(b9ThumbSrc)}" data-full="${esc(p.thumb||'')}" class="best9-thumb" onclick="event.stopPropagation();openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`:'<div class="best9-thumb-placeholder">📷</div>'}</div><div class="best9-photo-info"><div class="best9-photo-name">${esc(p.n||'無題')}</div><div class="best9-photo-meta">チーム：${esc(p.team||'不明')} ／ 👍${p.l||0}</div></div>${isBest?'<div class="best9-crown">🏆 選定中</div>':'<div class="best9-select-hint">タップで選定</div>'}</div>`;
   });
   gridHtml+='</div>';
   if(totalPages>1){
