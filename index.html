@@ -9,7 +9,7 @@
      管理画面で大会名・ロゴを変更した場合は、ここも合わせて更新して再デプロイが必要。 -->
 <meta property="og:title" content="ＵＪＢ　ＦＵＳＩＯＮ　ＣＵＰ２０２６">
 <meta property="og:description" content="4つの想いがひとつになる。交流・挑戦・友情・団結">
-<meta property="og:image" content="https://xohjlirseoyuklehqrmx.supabase.co/storage/v1/object/public/photos/logo/logo_1783849985374.jpg">
+<meta property="og:image" content="https://xohjlirseoyuklehqrmx.supabase.co/storage/v1/object/public/photos/logo/logo_1784122256770.jpg">
 <meta property="og:type" content="website">
 <!-- Supabase SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.2"></script>
@@ -76,7 +76,7 @@ const FEATURES = { donation: false };
 const STORAGE_BUCKET='photos';
 function storageUpload(path, blob, options){
   return sb.storage.from(STORAGE_BUCKET).upload(path, blob,
-    Object.assign({contentType:'image/jpeg', upsert:false}, options||{}));
+    Object.assign({contentType:(blob&&blob.type)||'image/jpeg', upsert:false}, options||{}));
 }
 function storageDelete(paths){
   return sb.storage.from(STORAGE_BUCKET).remove(paths);
@@ -93,6 +93,39 @@ function storagePathFromUrl(url){
     const path=decodeURIComponent(url.slice(idx+marker.length));
     return path||null;
   }catch(e){ return null; }
+}
+// 2026/7/16〜：DBには今後「相対パスのみ」を保存する方針に移行中（R2移行time-safe化のため）。
+// ただし移行前からの既存データはフルURLのまま残っているため、両方を安全に扱う変換関数を用意する。
+// resolveMediaUrl：DBの値（パス or フルURL）→ 表示用のフルURLに変換。<img src>等は必ずこれを経由する。
+function resolveMediaUrl(value){
+  if(!value) return value;
+  if(/^https?:\/\//.test(value)) return value; // 既存データ（フルURL）はそのまま
+  return storageGetUrl(value); // 新データ（パスのみ）はURLを組み立てる
+}
+// toStoragePath：DBの値（パス or フルURL）→ Storage削除等に使うバケット内パスに変換。
+function toStoragePath(value){
+  if(!value) return null;
+  if(/^https?:\/\//.test(value)) return storagePathFromUrl(value); // 既存データはURLから逆算
+  return value; // 新データは既にパスそのもの
+}
+// 2026/7/16〜：画像はWebP優先で保存（対応ブラウザではJPEGよりファイルサイズを削減）。
+// canvasからBlobを生成する箇所は必ずこれを経由する。WebPエンコード非対応のブラウザでは
+// canvas.toBlob(...,'image/webp',...)が黙ってPNG等にフォールバックすることがあるため、
+// 返ってきたBlobのtypeを確認し、'image/webp'でなければ明示的にJPEGを生成し直す。
+function canvasToBlobSmart(canvas, quality){
+  return new Promise((resolve)=>{
+    canvas.toBlob((webpBlob)=>{
+      if(webpBlob && webpBlob.type==='image/webp'){
+        resolve(webpBlob);
+      } else {
+        canvas.toBlob((jpgBlob)=>{ resolve(jpgBlob||null); }, 'image/jpeg', quality);
+      }
+    }, 'image/webp', quality);
+  });
+}
+// Blobの実際の形式（webp/jpeg）から、保存用ファイル名の拡張子を決定する
+function extFromBlob(blob){
+  return (blob && blob.type==='image/webp') ? 'webp' : 'jpg';
 }
 
 // 通信タイムアウト対策：Supabaseの呼び出しが一定時間で応答しない場合に
@@ -2212,7 +2245,7 @@ function makeThumbBlob(sourceBlob,maxDim=360,quality=0.72){
       canvas.width=w; canvas.height=h;
       const c=canvas.getContext('2d');
       c.drawImage(img,0,0,w,h);
-      canvas.toBlob((blob)=>{ resolve(blob||null); }, 'image/jpeg', quality);
+      canvasToBlobSmart(canvas, quality).then(blob=>resolve(blob||null));
     };
     img.onerror=()=>{ URL.revokeObjectURL(url); resolve(null); };
     img.src=url;
@@ -2255,11 +2288,12 @@ document.addEventListener('input',(e)=>{
 });
 function confirmCropModal(){
   if(!_cropper){ return; }
-  _cropper.getCroppedCanvas({imageSmoothingQuality:'high',maxWidth:1600,maxHeight:1600}).toBlob((blob)=>{
+  const canvas=_cropper.getCroppedCanvas({imageSmoothingQuality:'high',maxWidth:1600,maxHeight:1600});
+  canvasToBlobSmart(canvas, 0.88).then((blob)=>{
     const resolve=_cropResolve;
     closeCropModalInternal();
     if(resolve) resolve(blob);
-  },'image/jpeg',0.88);
+  });
 }
 // 切り取りをせず、元画像をそのまま（サイズ調整のみ）使用する
 function useOriginalCropModal(){
@@ -2277,11 +2311,11 @@ function useOriginalCropModal(){
     canvas.width=w; canvas.height=h;
     const c=canvas.getContext('2d');
     c.drawImage(img,0,0,w,h);
-    canvas.toBlob((blob)=>{
+    canvasToBlobSmart(canvas, 0.88).then((blob)=>{
       const resolve=_cropResolve;
       closeCropModalInternal();
       if(resolve) resolve(blob);
-    },'image/jpeg',0.88);
+    });
   };
   img.onerror=()=>{
     URL.revokeObjectURL(url);
@@ -2835,12 +2869,12 @@ async function uploadSiteLogo(){
   if(blob.size>15*1024*1024){ if(statusEl) statusEl.textContent='❌ 画像サイズは15MB以下にしてください'; return; }
   if(statusEl) statusEl.textContent='アップロード中…';
   try{
-    const filePath='logo/logo_'+Date.now()+'.jpg';
+    const filePath='logo/logo_'+Date.now()+'.'+extFromBlob(blob);
     const {error:upErr}=await storageUpload(filePath,blob);
     if(upErr){ if(statusEl) statusEl.textContent='❌ アップロードに失敗しました：'+upErr.message; return; }
-    const url=storageGetUrl(filePath);
+    const url=storageGetUrl(filePath); // 画面即時反映用（LOGO_URLはフルURLで保持）
     const oldLogoUrl=LOGO_URL;
-    const {error:dbErr}=await sb.from('settings').upsert({key:'logo_url',value:url},{onConflict:'key'});
+    const {error:dbErr}=await sb.from('settings').upsert({key:'logo_url',value:filePath},{onConflict:'key'}); // DBには相対パスのみ保存
     if(dbErr){ if(statusEl) statusEl.textContent='❌ 設定の保存に失敗しました：'+dbErr.message; return; }
     LOGO_URL=url;
     await bumpOgVersion(); // 共有URLのキャッシュ対策バージョンを更新
@@ -3111,7 +3145,7 @@ function resizeImageFile(file,maxDim,quality){
         const canvas=document.createElement('canvas');
         canvas.width=w; canvas.height=h;
         canvas.getContext('2d').drawImage(img,0,0,w,h);
-        canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('変換失敗')),'image/jpeg',quality);
+        canvasToBlobSmart(canvas, quality).then(blob=>blob?resolve(blob):reject(new Error('変換失敗')));
       };
       img.onerror=()=>reject(new Error('画像の読み込みに失敗しました'));
       img.src=e.target.result;
@@ -3173,7 +3207,7 @@ async function confirmUploadInfoImages(){
     const file=targetFiles[i];
     try{
       const blob=await resizeImageFile(file,1600,0.85);
-      const path=`info/${Date.now()}_${Math.random().toString(36).slice(2,8)}.jpg`;
+      const path=`info/${Date.now()}_${Math.random().toString(36).slice(2,8)}.${extFromBlob(blob)}`;
       const {error:upErr}=await storageUpload(path,blob);
       if(upErr){ console.error('参考画像アップロードエラー:',upErr); continue; }
       images.push({id:'img'+Date.now()+Math.random().toString(36).slice(2,6),path,url:storageGetUrl(path),title:titles[i]||''});
@@ -4039,16 +4073,16 @@ async function loadPhotosFromSupabase(){
     pendingPhotos=(data||[]).filter(r=>r.status==='pending').map(r=>({
       _id:r.id, seqNo:r.seq_no, cat:r.cat, n:r.title, author:r.author,
       team:r.team, player:r.player,
-      thumb:r.image_url||'📷',
-      thumbSmall:r.thumb_url||null,
+      thumb:resolveMediaUrl(r.image_url)||'📷',
+      thumbSmall:r.thumb_url?resolveMediaUrl(r.thumb_url):null,
       l:r.likes||0,
       submittedAt:r.created_at
     }));
     approvedPhotosExtra=(data||[]).filter(r=>r.status==='approved').map(r=>({
       _id:r.id, seqNo:r.seq_no, cat:r.cat, n:r.title, author:r.author,
       team:r.team, player:r.player,
-      thumb:r.image_url||'📷',
-      thumbSmall:r.thumb_url||null,
+      thumb:resolveMediaUrl(r.image_url)||'📷',
+      thumbSmall:r.thumb_url?resolveMediaUrl(r.thumb_url):null,
       l:r.likes||0,
       submittedAt:r.created_at
     }));
@@ -4216,19 +4250,19 @@ async function submitEntry(){
     // 画像ファイルがある場合はStorageにアップロード（切り取り済みBlobを使用）
     if(_pendingSubmitPhotoBlob){
       if(_pendingSubmitPhotoBlob.size>10*1024*1024){ showInlineMsg('submitError','画像サイズは10MB以下にしてください'); return; }
-      const filePath=newId+'.jpg';
+      const filePath=newId+'.'+extFromBlob(_pendingSubmitPhotoBlob);
       const {error:upErr}=await withTimeout(storageUpload(filePath, _pendingSubmitPhotoBlob), 15000);
       if(upErr){ showInlineMsg('submitError','画像のアップロードに失敗しました：'+upErr.message); return; }
-      imageUrl=storageGetUrl(filePath);
+      imageUrl=filePath; // DBには相対パスのみ保存（表示時はresolveMediaUrlでURL化）
 
       // 管理画面一覧表示用の軽量サムネイルも生成してアップロード（失敗しても本体投稿は続行）
       try{
         const thumbBlob=await makeThumbBlob(_pendingSubmitPhotoBlob,360,0.72);
         if(thumbBlob){
-          const thumbPath='thumb_'+newId+'.jpg';
+          const thumbPath='thumb_'+newId+'.'+extFromBlob(thumbBlob);
           const {error:thumbUpErr}=await storageUpload(thumbPath, thumbBlob);
           if(!thumbUpErr){
-            thumbUrl=storageGetUrl(thumbPath);
+            thumbUrl=thumbPath; // DBには相対パスのみ保存
           }
         }
       }catch(e){ console.warn('サムネイル生成に失敗（本体投稿は継続）:',e); }
@@ -4420,7 +4454,7 @@ async function uploadRosterPhoto(){
   if(blob.size>15*1024*1024){ statusEl.textContent='❌ 画像サイズは15MB以下にしてください'; return; }
   statusEl.textContent='アップロード中…';
   try{
-    const filePath='roster/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
+    const filePath='roster/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+extFromBlob(blob);
     const {error:upErr}=await storageUpload(filePath,blob);
     if(upErr){ statusEl.textContent='❌ アップロードに失敗しました：'+upErr.message; return; }
     const url=storageGetUrl(filePath);
@@ -4602,7 +4636,7 @@ function resizeImageFileSquare(file,size,quality){
       canvas.width=size; canvas.height=size;
       const c=canvas.getContext('2d');
       c.drawImage(img,sx,sy,side,side,0,0,size,size);
-      canvas.toBlob(blob=>{ blob?resolve(blob):reject(new Error('画像の変換に失敗しました')); },'image/jpeg',quality);
+      canvasToBlobSmart(canvas, quality).then(blob=>{ blob?resolve(blob):reject(new Error('画像の変換に失敗しました')); });
     };
     img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error('画像の読み込みに失敗しました')); };
     img.src=url;
@@ -4627,7 +4661,7 @@ async function confirmBulkRosterUpload(){
     if(statusEl) statusEl.textContent=`アップロード中… (${done}/${targets.length})`;
     try{
       const blob=m.customBlob||await resizeImageFileSquare(m.file,800,0.85);
-      const filePath='roster/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
+      const filePath='roster/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+extFromBlob(blob);
       const {error:upErr}=await storageUpload(filePath,blob);
       if(upErr){ failed++; continue; }
       const url=storageGetUrl(filePath);
@@ -5289,7 +5323,7 @@ function renderApprovedCheerList(){
 // ファイルが存在しない場合もエラーにはならないため、失敗しても投稿削除自体には影響させない。
 async function deletePhotoStorageFiles(ids){
   if(!ids||!ids.length) return;
-  const paths=ids.flatMap(id=>[id+'.jpg','thumb_'+id+'.jpg']);
+  const paths=ids.flatMap(id=>[id+'.jpg', id+'.webp', 'thumb_'+id+'.jpg', 'thumb_'+id+'.webp']);
   try{
     const {error}=await storageDelete(paths);
     if(error) console.warn('Storage孤児ファイル削除エラー（投稿自体は削除済み）:',error.message);
@@ -5301,7 +5335,7 @@ async function deletePhotoStorageFiles(ids){
 // 失敗しても投稿・保存自体には影響させない（孤児ファイルが1つ残るだけなので握りつぶす）。
 async function deleteStorageFileByUrl(url){
   try{
-    const path=storagePathFromUrl(url);
+    const path=toStoragePath(url);
     if(!path) return;
     const {error}=await storageDelete([path]);
     if(error) console.warn('旧ストレージファイル削除エラー（実害なし）:',error.message);
@@ -5536,7 +5570,7 @@ async function loadAlbumFromSupabase(){
   try{
     const {data,error}=await sb.from('album').select('*').order('sort_order',{ascending:true});
     if(error){ console.error('album読み込みエラー:',error.message); return; }
-    ALBUM_PHOTOS=(data||[]);
+    ALBUM_PHOTOS=(data||[]).map(r=>Object.assign({},r,{image_url:resolveMediaUrl(r.image_url)}));
     renderAlbumSlideshow();
     renderAlbumAdmin();
   } catch(e){ console.error('loadAlbum例外:',e); }
@@ -5615,15 +5649,13 @@ async function addAlbumPhoto(){
   statusEl.textContent='アップロード中...';
   try{
     const newId='alb_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-    const filePath='album/'+newId+'.jpg';
+    const filePath='album/'+newId+'.'+extFromBlob(blob);
 
     const {error:upErr}=await storageUpload(filePath,blob);
     if(upErr){ statusEl.textContent='❌ アップロード失敗：'+upErr.message; return; }
 
-    const imageUrl=storageGetUrl(filePath);
-
     const {error:dbErr}=await sb.from('album').insert({
-      id:newId, title, caption, image_url:imageUrl,
+      id:newId, title, caption, image_url:filePath, // DBには相対パスのみ保存
       sort_order:ALBUM_PHOTOS.length
     });
     if(dbErr){ statusEl.textContent='❌ 保存失敗：'+dbErr.message; return; }
@@ -6091,7 +6123,7 @@ async function loadSettingsFromSupabase(){
       }catch(e){ /* パース失敗時はデフォルト値を維持 */ }
     }
     if(row.key==='logo_url' && row.value){
-      LOGO_URL=row.value;
+      LOGO_URL=resolveMediaUrl(row.value);
     }
     if(row.key==='og_version' && row.value){
       const n=parseInt(row.value,10);
@@ -6942,7 +6974,7 @@ async function submitTeamRoster(){
     let teamPhotoUrl=_tiExistingTeamPhotoUrl||undefined;
     if(_pendingTiTeamPhotoBlob){
       showInlineMsg('tiSuccess','集合写真をアップロード中…');
-      const path='roster/'+_tiCurrentToken+'_team_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
+      const path='roster/'+_tiCurrentToken+'_team_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+extFromBlob(_pendingTiTeamPhotoBlob);
       try{
         const {error:upErr}=await withTimeout(storageUpload(path, _pendingTiTeamPhotoBlob), 15000);
         if(!upErr){
@@ -6956,7 +6988,7 @@ async function submitTeamRoster(){
       showInlineMsg('tiSuccess','写真をアップロード中…（'+photoJobs.length+'枚）');
       for(let i=0;i<photoJobs.length;i++){
         const job=photoJobs[i];
-        const path='roster/'+_tiCurrentToken+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
+        const path='roster/'+_tiCurrentToken+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+extFromBlob(job.blob);
         try{
           const {error:upErr}=await withTimeout(storageUpload(path, job.blob), 15000);
           if(!upErr){
