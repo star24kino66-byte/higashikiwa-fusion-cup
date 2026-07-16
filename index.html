@@ -63,31 +63,71 @@ const FEATURES = { donation: false };
 
 /* ---------- Storage抽象化層 ----------
  * 画像等メディアファイルの保存先を、コード全体から隠蔽する窓口。
- * 将来Cloudflare R2等へ移行する際は、この4関数の内部実装だけを差し替えれば
  * 呼び出し側（投稿・ロゴ・参考画像・名簿写真・アルバム・削除処理）は一切変更不要。
- * 返り値の形はsupabase-js Storage APIに合わせている：
+ * 返り値の形は、旧実装(supabase-js Storage API)との互換のため揃えている：
  *   storageUpload(path, blob[, options]) → Promise<{data, error}>
  *   storageDelete(paths)                 → Promise<{data, error}>
  *   storageGetUrl(path)                  → 公開URL文字列
  *   storagePathFromUrl(url)              → 公開URLからバケット内パスを逆算（不明ならnull）
- * 注意：supabase-jsのStorage APIはRLS拒否等でもrejectせず{error}で返すため、
- * 呼び出し側は必ず{error}をチェックすること（.catchだけでは失敗を検知できない）。
+ * 注意：呼び出し側は必ず{error}をチェックすること（.catchだけでは失敗を検知できない）。
+ *
+ * 2026/7/16〜：⑧R2移行。実体はCloudflare Worker(fusioncup-storage)経由でR2バケット
+ * (fusion-cup)を読み書きする方式に変更。書き込み(PUT/DELETE)はWorkerを経由し、
+ * 読み込みはR2のPublic Development URLを直接参照する（Workerを介さない）。
+ * 認可（誰が削除していいか）は今まで通りSupabase側(RLS/RPCのdelete_token照合)が判断し、
+ * Workerはファイル実体の削除だけを担当する設計（認可ロジックの二重管理を避けるため）。
+ * 旧Supabase Storageに残っている過去データ（フルURL保存）はSUPABASE_LEGACY_BUCKET経由で
+ * 引き続き解決できるようにし、resolveMediaUrl/toStoragePathの新旧混在対応はそのまま活かす。
  */
-const STORAGE_BUCKET='photos';
-function storageUpload(path, blob, options){
-  return sb.storage.from(STORAGE_BUCKET).upload(path, blob,
-    Object.assign({contentType:(blob&&blob.type)||'image/jpeg', upsert:false}, options||{}));
+const STORAGE_WORKER_URL='https://fusioncup-storage.star24kino66.workers.dev';
+const STORAGE_PUBLIC_URL='https://pub-8c07059c9f7f49cfa56d853aacd55e84.r2.dev';
+const SUPABASE_LEGACY_BUCKET='photos'; // 移行前の既存データ（フルURL）解決用。新規保存には使わない。
+
+async function storageUpload(path, blob, options){
+  try{
+    const contentType=(options&&options.contentType)||(blob&&blob.type)||'image/jpeg';
+    const res=await fetch(STORAGE_WORKER_URL+'/'+path, {
+      method:'PUT',
+      headers:{'Content-Type':contentType},
+      body:blob,
+    });
+    if(!res.ok){
+      const text=await res.text().catch(()=>'');
+      return {data:null, error:{message:'アップロード失敗（'+res.status+'）：'+text}};
+    }
+    return {data:{path}, error:null};
+  }catch(e){
+    return {data:null, error:{message:String(e)}};
+  }
 }
-function storageDelete(paths){
-  return sb.storage.from(STORAGE_BUCKET).remove(paths);
+async function storageDelete(paths){
+  if(!paths||!paths.length) return {data:[], error:null};
+  try{
+    const results=await Promise.all(paths.map(p=>
+      fetch(STORAGE_WORKER_URL+'/'+p, {method:'DELETE'}).then(res=>({path:p, ok:res.ok}))
+    ));
+    const failed=results.filter(r=>!r.ok);
+    if(failed.length){
+      return {data:results, error:{message:failed.length+'件の削除に失敗しました'}};
+    }
+    return {data:results, error:null};
+  }catch(e){
+    return {data:null, error:{message:String(e)}};
+  }
 }
 function storageGetUrl(path){
-  return sb.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+  return STORAGE_PUBLIC_URL+'/'+path;
 }
 function storagePathFromUrl(url){
   if(!url) return null;
   try{
-    const marker='/storage/v1/object/public/'+STORAGE_BUCKET+'/';
+    // 新形式（R2公開URL）
+    const r2Marker=STORAGE_PUBLIC_URL+'/';
+    if(url.indexOf(r2Marker)===0){
+      return decodeURIComponent(url.slice(r2Marker.length))||null;
+    }
+    // 旧形式（Supabase Storage公開URL）— 移行前データの互換用に残す
+    const marker='/storage/v1/object/public/'+SUPABASE_LEGACY_BUCKET+'/';
     const idx=url.indexOf(marker);
     if(idx===-1) return null;
     const path=decodeURIComponent(url.slice(idx+marker.length));
