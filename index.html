@@ -2579,12 +2579,18 @@ function applyThemeToDOM(themeId){
   }else{
     document.documentElement.removeAttribute('data-theme');
   }
-  reKickScrollAnimations();
+  // モバイルSafari対策：ピクセルクラフト等、[data-theme] *{border-radius:0!important;}のような
+  // 全要素に効くセレクタを含むテーマへの切替直後は、大規模な再スタイル計算が発生する。
+  // その場でアニメーションを再キックすると、直後に来る重い再計算に巻き込まれて
+  // 結局アニメーションが止まったままになることがあるため、再スタイル計算が確実に
+  // 完了したと言えるタイミング（2フレーム後）まで待ってから再キックする。
+  requestAnimationFrame(()=>{
+    requestAnimationFrame(reKickScrollAnimations);
+  });
+  // 保険：フレームベースの再キックだけでは足りない端末向けに、少し時間を置いてもう一度試す
+  setTimeout(reKickScrollAnimations, 400);
 }
-// テーマ切替（特にピクセルクラフト＝全要素にborder-radius:0!importantが効く等、大規模な再描画を伴うテーマ）
-// の直後に、一部のモバイルブラウザで寄付者バナー・応援メッセージの流れるアニメーションが
-// 再開されずに止まったままになることがあるための対策。animationを一度解除→強制リフロー→再設定して
-// アニメーションを確実に再始動させる。
+// 寄付者バナー・応援メッセージ等、流れるCSSアニメーションを強制的に再始動する。
 function reKickScrollAnimations(){
   document.querySelectorAll('.donor-row-track.scroll-left, .cheer-track.scroll-left').forEach(el=>{
     el.style.animation='none';
