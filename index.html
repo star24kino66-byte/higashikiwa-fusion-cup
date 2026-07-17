@@ -1636,14 +1636,16 @@ img{
 <!-- ADMIN PANEL -->
 <div class="page-view" id="page-admin">
 <div class="admin-panel" id="adminPanel">
-  <div class="admin-form-card" id="publicThemeCard" style="max-width:320px;margin:1.5rem auto 0;">
+  <div class="admin-form-card" id="siteShareCard" style="max-width:320px;margin:1.5rem auto 0;">
+    <div class="admin-form-title">🔗 このサイトを共有</div>
+    <p style="font-size:12px;color:#666;margin-bottom:.6rem;">QRコードやリンクで、このサイトを誰でも共有できます。</p>
+    <button class="ubtn" onclick="openShareModal()">🔗 共有リンク・QRコードを表示</button>
+  </div>
+  <div class="admin-form-card" id="publicThemeCard" style="max-width:320px;margin:1rem auto 0;">
     <div class="admin-form-title">🎨 サイトのテーマ変更</div>
     <p style="font-size:12px;color:#666;margin-bottom:.6rem;">パスワード不要で、この端末の見た目だけ好きなテーマに変更できます。</p>
     <div id="themePickMenu"></div>
     <button class="theme-pick-reset" id="themePickResetBtn" onclick="resetThemeLocal()" style="display:none;">サイトのおすすめに戻す</button>
-    <div style="text-align:center;margin-top:.8rem;border-top:1px solid #eee;padding-top:.8rem;">
-      <button onclick="openShareModal()" style="background:none;border:none;color:#888;font-size:11px;text-decoration:underline;cursor:pointer;padding:4px 8px;">🔗 このサイトを共有（QRコード）</button>
-    </div>
   </div>
   <div id="adminLoginView" class="admin-login">
     <h2>🔒 管理者ログイン</h2>
@@ -3463,40 +3465,21 @@ function rp(){
   }
 }
 // フォトベスト9グリッド（運営選定6枠＋いいねTOP3枠）
-// 仮写真データ（管理画面で実写真が選定されるまでのプレースホルダー）
-function getDummyPhotos(){
-  return [
-    {e:'⚾',n:'全力疾走の一瞬',team:SITE_TEAM_NAME},
-    {e:'😊',n:'みんなの笑顔',team:SITE_TEAM_NAME},
-    {e:'📣',n:'力強い応援',team:'保護者'},
-    {e:'🤝',n:'チームの絆',team:SITE_TEAM_NAME},
-    {e:'🏆',n:'50年の歴史',team:SITE_TEAM_NAME},
-    {e:'📸',n:'ベストショット',team:SITE_TEAM_NAME},
-  ];
-}
-function getDummyLike(){
-  return [
-    {e:'🔥',n:'熱戦の瞬間',team:SITE_TEAM_NAME,cat:'hard',l:42},
-    {e:'💪',n:'渾身のプレー',team:'参加チーム',cat:'hard',l:38},
-    {e:'🌟',n:'輝く笑顔',team:'参加チーム',cat:'smile',l:35},
-  ];
-}
+// 未選定の枠は実在しない写真・チーム名を出さず「投稿をお待ちしています！」の空状態表示にする
 function renderBest9Grid(){
   const el=document.getElementById('best9Grid');
   if(!el) return;
   const bsMap=typeof bestShots!=='undefined'?bestShots:{};
   const apPhotos=typeof approvedPhotosExtra!=='undefined'?approvedPhotosExtra:[];
-  const dummyPhotos=getDummyPhotos();
-  const dummyLike=getDummyLike();
 
-  // 運営選定6枠：選定済みなら実写真、未選定なら仮データ
-  const awardCards=CATS.map(([catKey,catName,catIco],idx)=>{
+  // 運営選定6枠：選定済みなら実写真、未選定は「投稿をお待ちしています！」の空状態表示
+  const awardCards=CATS.map(([catKey,catName,catIco])=>{
     const selId=bsMap[catKey];
     let photo=null,isDummy=false;
     if(selId){
       photo=apPhotos.find(p=>p._id===selId)||(PH[catKey]||[]).find(p=>p._id===selId);
     }
-    if(!photo){ photo=dummyPhotos[idx]||{e:'📷',n:'選定中...',team:''}; isDummy=true; }
+    if(!photo){ photo={e:'📷',n:'',team:''}; isDummy=true; }
     return {catKey,catName,catIco,photo,isDummy};
   });
 
@@ -3506,9 +3489,9 @@ function renderBest9Grid(){
   Object.keys(PH).forEach(cat=>(PH[cat]||[]).forEach((p,i)=>allPhotos.push({...p,cat,idx:i})));
   apPhotos.forEach(p=>{ if(!allPhotos.some(x=>x._id&&x._id===p._id)) allPhotos.push({...p,idx:9999}); });
   const realTop3=allPhotos.filter(p=>!p._id||!selectedIds.has(p._id)).sort((a,b)=>b.l-a.l).slice(0,LIKE_SLOTS);
-  // 実データが足りない場合は仮データで補完
+  // 実データが足りない場合は「投稿をお待ちしています！」の空状態カードで補完
   const likeTop3=realTop3.length>=LIKE_SLOTS ? realTop3 :
-    [...realTop3, ...dummyLike.slice(realTop3.length)];
+    [...realTop3, ...Array(LIKE_SLOTS-realTop3.length).fill(null).map(()=>({e:'📷',n:'',team:'',cat:'',l:0}))];
   const likeMedals=['🥇','🥈','🥉'];
 
   // 描画
@@ -3526,18 +3509,20 @@ function renderBest9Grid(){
   awardCards.forEach(({catKey,catName,catIco,photo,isDummy})=>{
     const card=document.createElement('div');
     card.className='best9-pub-card'+(isDummy?'':' has-photo');
-    const photoThumbSrc=(photo.thumbSmall&&(photo.thumbSmall.startsWith('data:')||photo.thumbSmall.startsWith('http')))?photo.thumbSmall:photo.thumb;
+    const photoThumbSrc=isDummy?null:((photo.thumbSmall&&(photo.thumbSmall.startsWith('data:')||photo.thumbSmall.startsWith('http')))?photo.thumbSmall:photo.thumb);
     const imgHtml=(photoThumbSrc&&(photoThumbSrc.startsWith('data:')||photoThumbSrc.startsWith('http')))
       ?`<img src="${photoThumbSrc}" data-full="${photo.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`
-      :`<div class="best9-pub-emoji">${photo.e||'📷'}</div>`;
+      :`<div class="best9-pub-emoji">📷</div>`;
     // 賞名が長い場合（例：ベストショット賞）はバッジのフォントを一段小さくして1行に収める
     const badgeLongCls=(catName&&catName.length>=7)?' badge-long':'';
+    const titleHtml=isDummy?'投稿をお待ちしています！':(photo.n||'');
+    const teamHtml=isDummy?'':(photo.team||'');
     card.innerHTML=`
       <div class="best9-pub-badge${badgeLongCls}">${catIco} ${catName}</div>
       ${imgHtml}
       ${(!isDummy&&photoLabel(photo.seqNo))?`<div class="best9-pub-no"><span class="row-no">${photoLabel(photo.seqNo)}</span></div>`:''}
-      <div class="best9-pub-title">${photo.n||''}</div>
-      <div class="best9-pub-team">${photo.team||''}</div>`;
+      <div class="best9-pub-title">${titleHtml}</div>
+      <div class="best9-pub-team">${teamHtml}</div>`;
     if(isDummy) card.classList.add('is-dummy');
     grid1.appendChild(card);
   });
@@ -3555,16 +3540,18 @@ function renderBest9Grid(){
     const isDummy=!p._id;
     const card=document.createElement('div');
     card.className='best9-pub-card best9-like-card'+(isDummy?'':' has-photo');
-    const pThumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb;
+    const pThumbSrc=isDummy?null:((p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb);
     const imgHtml=(pThumbSrc&&(pThumbSrc.startsWith('data:')||pThumbSrc.startsWith('http')))
       ?`<img src="${pThumbSrc}" data-full="${p.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`
-      :`<div class="best9-pub-emoji">${thumbHtml(p.e||'📷','60px')}</div>`;
+      :`<div class="best9-pub-emoji">📷</div>`;
+    const titleHtml=isDummy?'投稿をお待ちしています！':(p.n||'');
+    const catHtml=isDummy?'':(catLabel[p.cat]||p.team||'');
     card.innerHTML=`
       <div class="best9-pub-badge like-badge">${likeMedals[i]} ${i+1}位</div>
       ${imgHtml}
       ${(!isDummy&&photoLabel(p.seqNo))?`<div class="best9-pub-no"><span class="row-no">${photoLabel(p.seqNo)}</span></div>`:''}
-      <div class="best9-pub-title">${p.n||''}</div>
-      <div class="best9-pub-cat">${catLabel[p.cat]||p.team||''}</div>`;
+      <div class="best9-pub-title">${titleHtml}</div>
+      <div class="best9-pub-cat">${catHtml}</div>`;
     if(isDummy) card.classList.add('is-dummy');
     grid2.appendChild(card);
   });
