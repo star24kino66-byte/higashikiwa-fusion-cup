@@ -2579,6 +2579,18 @@ function applyThemeToDOM(themeId){
   }else{
     document.documentElement.removeAttribute('data-theme');
   }
+  reKickScrollAnimations();
+}
+// テーマ切替（特にピクセルクラフト＝全要素にborder-radius:0!importantが効く等、大規模な再描画を伴うテーマ）
+// の直後に、一部のモバイルブラウザで寄付者バナー・応援メッセージの流れるアニメーションが
+// 再開されずに止まったままになることがあるための対策。animationを一度解除→強制リフロー→再設定して
+// アニメーションを確実に再始動させる。
+function reKickScrollAnimations(){
+  document.querySelectorAll('.donor-row-track.scroll-left, .cheer-track.scroll-left').forEach(el=>{
+    el.style.animation='none';
+    void el.offsetHeight; // 強制リフロー
+    el.style.animation='';
+  });
 }
 function getLocalThemeOverride(){
   try{ return localStorage.getItem(THEME_OVERRIDE_KEY)||''; }catch(e){ return ''; }
