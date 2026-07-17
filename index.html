@@ -956,8 +956,13 @@ img.clickable-photo{cursor:zoom-in;}
     radial-gradient(circle,rgba(255,255,255,.10) 1.5px,transparent 1.6px) 6px 6px/26px 26px,
     radial-gradient(circle,rgba(0,0,0,.18) 1.5px,transparent 1.6px) 18px 16px/26px 26px;
 }
-/* 角丸を全廃してブロックらしい直角に（全ページ・全要素・インラインstyle指定も含めて統一） */
-[data-theme="minecraft"] *{
+/* 角丸を全廃してブロックらしい直角に（全ページ・全要素・インラインstyle指定も含めて統一）
+   ※寄付者・協賛・応援メッセージの「流れるバナー」内部だけは対象から除外している。
+   これらはカードが多数（複製込みで数十個）並ぶ上にCSSアニメーションで常時動いており、
+   iOS Safariではこの範囲まで一斉にスタイル変更すると、アニメーション中のコンポジット
+   レイヤーが崩れて完全に停止したまま復帰しなくなる不具合が実機で確認されたため。
+   代償として、これら3つのバナー内のカードはピクセルクラフトでも角丸のまま残る。 */
+[data-theme="minecraft"] *:not(.donor-row-wrap):not(.donor-row-wrap *):not(.sponsor-row-wrap):not(.sponsor-row-wrap *):not(.cheer-row-wrap):not(.cheer-row-wrap *){
   border-radius:0!important;
 }
 /* フォント（和文はDotGothic16、見出し・数字はPress Start 2P） */
@@ -2597,6 +2602,14 @@ function reKickScrollAnimations(){
     void el.offsetHeight; // 強制リフロー
     el.style.animation='';
   });
+  // iOS Safariでは、タブ切替（＝ページの非表示→再表示）でコンポジット処理が再同期され、
+  // 止まっていたCSSアニメーションが復帰することが実機で確認されている。それに近い効果を
+  // 得るため、ごくわずかなスクロールを強制的に発生させてページ全体の再描画を促す。
+  try{
+    const y=window.scrollY;
+    window.scrollTo(0, y+1);
+    window.scrollTo(0, y);
+  }catch(e){}
 }
 function getLocalThemeOverride(){
   try{ return localStorage.getItem(THEME_OVERRIDE_KEY)||''; }catch(e){ return ''; }
