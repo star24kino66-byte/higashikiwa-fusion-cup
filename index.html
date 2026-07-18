@@ -3058,10 +3058,10 @@ async function updateSiteName(){
 
 /* =========================================================
    全チーム選手名簿（自チーム・対戦チーム統合管理）
-   Supabase settings テーブル key: 'teams_roster' で全端末共有
+   Supabase teamsテーブル（1チーム=1行）で全端末共有
    構造：[{name, manager, coaches, isHost, roster:[{num,grade,name,batThrow,pos,dream,captain}]}]
    ========================================================= */
-let TEAMS_ROSTER=[]; // loadSettingsFromSupabaseで取得
+let TEAMS_ROSTER=[]; // loadTeamsFromSupabaseで取得
 
 function getHostTeams(){
   return TEAMS_ROSTER.filter(t=>t.isHost);
@@ -3072,24 +3072,87 @@ function getOppTeamsList(){
 function findTeamByName(name){
   return TEAMS_ROSTER.find(t=>t.name===name);
 }
-// 表示用のフォールバック（teams_roster未設定時）：チーム名は実際の設定値を使い、選手名簿は空（ダミー選手名は表示しない）
+// 表示用のフォールバック（チーム未登録時）：チーム名は実際の設定値を使い、選手名簿は空（ダミー選手名は表示しない）
 function getDisplayTeams(){
   if(TEAMS_ROSTER.length>0) return TEAMS_ROSTER;
   return [{name:SITE_TEAM_NAME,manager:'',coaches:'',isHost:true,roster:[]}];
 }
+// チームを1件=1行のteamsテーブルへ保存する（name列を一致キーにupsert）。
+// 注意：チーム名の変更（リネーム）はここを通さず renameTeamPrompt 内で個別に
+// UPDATE ... WHERE name=oldName する（upsertはnameが変わると別行を新規作成してしまうため）。
 async function saveTeamsRoster(teams){
-  const {error}=await sb.from('settings').upsert({key:'teams_roster',value:JSON.stringify(teams)},{onConflict:'key'});
-  if(error){ console.error('teams_roster保存エラー:',error); throw error; }
+  const rows=teams.map((t,i)=>({
+    name:t.name,
+    manager:t.manager||'',
+    coaches:t.coaches||'',
+    is_host:!!t.isHost,
+    roster:t.roster||[],
+    team_photo_url:t.teamPhotoUrl||null,
+    edit_token:t.editToken||null,
+    sort_order:i
+  }));
+  const {error}=await sb.from('teams').upsert(rows,{onConflict:'name'});
+  if(error){ console.error('teams保存エラー:',error); throw error; }
+  // 渡された配列に含まれないチームは削除する（Excel一括登録で対戦チームが入れ替わった場合に対応。
+  // 「配列＝全チームの正」とみなす考え方は、settings丸ごと置き換えだった旧方式を踏襲したもの）
+  const keepNames=teams.map(t=>t.name);
+  const {data:existing}=await sb.from('teams').select('name');
+  const toDelete=(existing||[]).map(r=>r.name).filter(n=>!keepNames.includes(n));
+  if(toDelete.length>0){
+    const {error:delErr}=await sb.from('teams').delete().in('name',toDelete);
+    if(delErr) console.error('teams削除エラー(除外分):',delErr);
+  }
   TEAMS_ROSTER=teams;
+}
+// teamsテーブルから選手名簿を読み込み、TEAMS_ROSTERに反映する
+async function loadTeamsFromSupabase(){
+  const {data,error}=await sb.from('teams').select('*').order('sort_order',{ascending:true});
+  if(error){ console.error('teams読み込みエラー:',error); return; }
+  TEAMS_ROSTER=(data||[]).map(row=>({
+    id:row.id,
+    name:row.name,
+    manager:row.manager||'',
+    coaches:row.coaches||'',
+    isHost:!!row.is_host,
+    roster:row.roster||[],
+    teamPhotoUrl:row.team_photo_url||undefined,
+    editToken:row.edit_token||undefined
+  }));
+  // 選手IDが未設定のデータ（ID導入以前の名簿）を自動発番して永続化（初回移行）
+  if(TEAMS_ROSTER.length>0){
+    let idsChanged=false;
+    TEAMS_ROSTER.forEach(t=>{
+      (t.roster||[]).forEach(p=>{
+        if(!p.id){ p.id=genPlayerId(); idsChanged=true; }
+      });
+    });
+    if(idsChanged){ saveTeamsRoster(TEAMS_ROSTER).catch(e=>console.error('選手ID自動発番の保存に失敗:',e)); }
+  }
 }
 
 /* ---------- チーム専用リンクからの選手名簿入力・承認フロー ---------- */
 // 提出データ（未承認）: [{token, teamName, manager, coaches, roster:[{num,grade,name,batThrow,pos,dream,captain}], submittedAt}]
 let PENDING_ROSTER=[];
-async function savePendingRoster(list){
-  const {error}=await sb.from('settings').upsert({key:'roster_pending',value:JSON.stringify(list)},{onConflict:'key'});
-  if(error){ console.error('roster_pending保存エラー:',error); throw error; }
-  PENDING_ROSTER=list;
+// roster_submissionsテーブルから承認待ち提出一覧を読み込む
+async function loadRosterSubmissionsFromSupabase(){
+  const {data,error}=await sb.from('roster_submissions').select('*').order('submitted_at',{ascending:true});
+  if(error){ console.error('roster_submissions読み込みエラー:',error); return; }
+  PENDING_ROSTER=(data||[]).map(row=>({
+    token:row.token,
+    teamName:row.team_name||'',
+    manager:row.manager||'',
+    coaches:row.coaches||'',
+    roster:row.roster||[],
+    teamPhotoUrl:row.team_photo_url||undefined,
+    submittedAt:row.submitted_at
+  }));
+}
+// 1件の提出（トークン指定）だけをroster_submissionsから削除する（承認・却下時）。
+// 全件配列を書き戻す方式ではないため、他チームが同時に提出しても消えない。
+async function deletePendingSubmission(token){
+  const {error}=await sb.from('roster_submissions').delete().eq('token',token);
+  if(error){ console.error('roster_submissions削除エラー:',error); throw error; }
+  PENDING_ROSTER=PENDING_ROSTER.filter(p=>p.token!==token);
 }
 function findTeamByToken(token){
   if(!token) return null;
@@ -5807,6 +5870,8 @@ function renderAlbumAdmin(){
     loadGamesFromSupabase(),
     loadBlocksFromSupabase(),
     loadSettingsFromSupabase(),
+    loadTeamsFromSupabase(),
+    loadRosterSubmissionsFromSupabase(),
     loadDonorsFromSupabase(),
     loadPhotosFromSupabase(),
     loadAlbumFromSupabase(),
@@ -5897,15 +5962,23 @@ function renderAlbumAdmin(){
   }
   const _scheduleSettingsSync=_makeBurstSync(async()=>{
     await loadSettingsFromSupabase();
-    _safeRender('名簿承認待ち', ()=>renderRosterPendingAdmin());
     _safeRender('期間判定', ()=>checkPeriods());
     _safeRender('大会要綱', ()=>renderTournamentInfo(getDisplayTournamentInfo()));
     _safeRender('参考画像', ()=>renderInfoImages());
-    _safeRender('チーム関連表示', ()=>renderAllTeamViews());
     _safeRender('期間設定管理', ()=>{
       const adminMain=document.getElementById('adminMainView');
       if(adminMain && adminMain.style.display!=='none'){ renderPeriodAdmin(); }
     });
+  });
+  // teams（選手名簿・チーム定義）：1チーム=1行のため、他チームの並行編集を巻き込まない
+  const _scheduleTeamsSync=_makeBurstSync(async()=>{
+    await loadTeamsFromSupabase();
+    _safeRender('チーム関連表示', ()=>renderAllTeamViews());
+  });
+  // roster_submissions（選手名簿の提出・承認待ち一覧）
+  const _scheduleRosterSubmissionsSync=_makeBurstSync(async()=>{
+    await loadRosterSubmissionsFromSupabase();
+    _safeRender('名簿承認待ち', ()=>renderRosterPendingAdmin());
   });
 
   // 新着通知トースト：写真・応援メッセージの「投稿」「公開（承認）」をその場にいる全員へお知らせする
@@ -5950,6 +6023,11 @@ function renderAlbumAdmin(){
       .on('postgres_changes',{event:'*',schema:'public',table:'donors'}, _scheduleDonorsSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'games'}, _scheduleGamesSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'tournament_blocks'}, _scheduleBlocksSync)
+      .on('postgres_changes',{event:'*',schema:'public',table:'teams'}, _scheduleTeamsSync)
+      .on('postgres_changes',{event:'*',schema:'public',table:'roster_submissions'}, payload=>{
+        _scheduleRosterSubmissionsSync();
+        if(payload.eventType==='INSERT') notifyOnInsert('選手名簿の提出','📋')();
+      })
       .on('postgres_changes',{event:'*',schema:'public',table:'settings'}, payload=>{
         // 【2026/7/17 追加】診断用ログ。「選手名簿の提出がリアルタイムで管理画面に出ない」件の切り分け用。
         // ここが出力されていれば通知は届いている＝原因は描画側。出力されなければ通知自体が届いていない。
@@ -5966,7 +6044,7 @@ function renderAlbumAdmin(){
   // フォールバック：Realtimeが繋がっていない場合は10秒ポーリング
   setInterval(async()=>{
     if(_realtimeOk) return;
-    await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase()]);
+    await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase(), loadTeamsFromSupabase(), loadRosterSubmissionsFromSupabase()]);
     checkPeriods();
     _refreshPublic(); _refreshAdmin();
     renderAllTeamViews();
@@ -5977,13 +6055,13 @@ function renderAlbumAdmin(){
   // 運営が待っている情報（特にチームからの選手名簿提出）が取りこぼされないようにする。
   // ・一般来場者の端末では一切動かない（管理画面を開いている運営スタッフの端末のみ）ため、
   //   大会当日に来場者が増えても通信量・Supabaseの負荷は増えない。
-  // ・取得するのはsettingsテーブルのみ（小さい）。
+  // ・取得するのは選手名簿の提出データ（roster_submissions）のみ（小さい）。
   // ・Realtimeが正常に届いている場合は同じ内容で再描画されるだけで、実害はない。
   setInterval(async()=>{
     const adminMain=document.getElementById('adminMainView');
     if(!adminMain || adminMain.style.display==='none') return; // 管理画面を開いていなければ何もしない
     try{
-      await loadSettingsFromSupabase();
+      await loadRosterSubmissionsFromSupabase();
       renderRosterPendingAdmin();
     }catch(e){ console.warn('管理画面の定期更新に失敗（次回リトライします）:', e); }
   }, 20000);
@@ -5992,9 +6070,10 @@ function renderAlbumAdmin(){
   // その場で最新データを取り直す。管理画面を開いている場合は管理側の表示も更新する。
   async function forceRefreshAll(reason){
     try{
-      await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase()]);
+      await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase(), loadTeamsFromSupabase(), loadRosterSubmissionsFromSupabase()]);
       checkPeriods();
       _refreshPublic();
+      renderAllTeamViews();
       const adminMain=document.getElementById('adminMainView');
       if(adminMain && adminMain.style.display!=='none'){ _refreshAdmin(); }
     }catch(e){ console.warn('再取得に失敗:', e); }
@@ -6062,7 +6141,7 @@ async function execReset(target){
         renderGameAdmin();
         break;
       case 'players':
-        await sb.from('settings').upsert({key:'teams_roster',value:'[]'},{onConflict:'key'});
+        await sb.from('teams').delete().neq('id','00000000-0000-0000-0000-000000000000');
         TEAMS_ROSTER=[];
         renderAllTeamViews();
         break;
@@ -6223,12 +6302,6 @@ async function loadSettingsFromSupabase(){
       const el=document.getElementById('spThresholdInput');
       if(el) el.value=SP_THRESHOLD;
     }
-    if(row.key==='teams_roster'){
-      try{ TEAMS_ROSTER=JSON.parse(row.value)||[]; }catch(e){ TEAMS_ROSTER=[]; }
-    }
-    if(row.key==='roster_pending'){
-      try{ PENDING_ROSTER=JSON.parse(row.value)||[]; }catch(e){ PENDING_ROSTER=[]; }
-    }
     if(row.key==='tournament_info'){
       try{ TOURNAMENT_INFO=JSON.parse(row.value)||[]; }catch(e){ TOURNAMENT_INFO=[]; }
     }
@@ -6278,16 +6351,6 @@ async function loadSettingsFromSupabase(){
   buildThemePicker();
   if(!getLocalThemeOverride()) applyThemeToDOM(SITE_THEME);
   refreshThemeUI();
-  // 選手IDが未設定のデータ（ID導入以前の名簿）を自動発番して永続化（初回移行）
-  if(TEAMS_ROSTER.length>0){
-    let idsChanged=false;
-    TEAMS_ROSTER.forEach(t=>{
-      (t.roster||[]).forEach(p=>{
-        if(!p.id){ p.id=genPlayerId(); idsChanged=true; }
-      });
-    });
-    if(idsChanged){ saveTeamsRoster(TEAMS_ROSTER).catch(e=>console.error('選手ID自動発番の保存に失敗:',e)); }
-  }
 }
 
 function isInPeriod(type){
@@ -6632,11 +6695,61 @@ function renderTeamLinkAdmin(){
     regenBtn.style.cssText='font-size:12px;padding:7px 10px;border:1px solid #ddd;background:#fff;color:#888;border-radius:8px;cursor:pointer;';
     regenBtn.textContent='🔄 再発行';
     regenBtn.onclick=()=>regenerateTeamLink(team.name);
+    const clearBtn=document.createElement('button');
+    clearBtn.type='button';
+    clearBtn.style.cssText='font-size:12px;padding:7px 10px;border:1px solid #f0c98a;background:#fff8ec;color:#a06a1a;border-radius:8px;cursor:pointer;';
+    clearBtn.textContent='🧹 名簿をクリア';
+    clearBtn.onclick=()=>clearTeamRoster(team.name);
+    const deleteBtn=document.createElement('button');
+    deleteBtn.type='button';
+    deleteBtn.style.cssText='font-size:12px;padding:7px 10px;border:1px solid #f0b3b3;background:#fff0f0;color:#a02020;border-radius:8px;cursor:pointer;';
+    deleteBtn.textContent='🗑 チーム削除';
+    deleteBtn.onclick=()=>deleteTeamCompletely(team.name);
     btnRow.appendChild(copyBtn);
     btnRow.appendChild(regenBtn);
+    btnRow.appendChild(clearBtn);
+    btnRow.appendChild(deleteBtn);
     row.appendChild(btnRow);
     list.appendChild(row);
   });
+}
+
+// チームの選手名簿（選手一覧・監督/コーチ名・集合写真）だけを消去する。
+// チーム自体と入力リンクは残るので、同じリンクからチームに再提出してもらえる
+// （承認済みの誤った内容をゼロから出し直させたい場合を想定）。
+async function clearTeamRoster(teamName){
+  const team=TEAMS_ROSTER.find(t=>t.name===teamName);
+  if(!team) return;
+  if(!confirm('「'+teamName+'」の選手名簿（選手一覧・監督/コーチ名・集合写真）を消去します。\nチーム自体と入力リンクはそのまま残るので、同じリンクから再提出できます。\nよろしいですか？')) return;
+  const oldUrls=(team.roster||[]).map(p=>p.photoUrl).filter(Boolean);
+  if(team.teamPhotoUrl) oldUrls.push(team.teamPhotoUrl);
+  try{
+    const {error}=await sb.from('teams').update({manager:'',coaches:'',roster:[],team_photo_url:null}).eq('name',teamName);
+    if(error) throw error;
+    TEAMS_ROSTER=TEAMS_ROSTER.map(t=>t.name===teamName?{...t,manager:'',coaches:'',roster:[],teamPhotoUrl:undefined}:t);
+    renderAllTeamViews();
+    oldUrls.forEach(u=>deleteStorageFileByUrl(u));
+    alert('✅「'+teamName+'」の選手名簿を消去しました。');
+  }catch(err){ alert('❌ 消去に失敗しました：'+err.message); }
+}
+
+// チームをチーム一覧から完全に削除する（誤って追加したチーム向け）。
+// 選手名簿・入力リンクごと失われ、元に戻せない。
+async function deleteTeamCompletely(teamName){
+  const team=TEAMS_ROSTER.find(t=>t.name===teamName);
+  if(!team) return;
+  if(!confirm('「'+teamName+'」をチーム一覧から完全に削除します。\n選手名簿・入力リンクもすべて失われ、元に戻せません。\n誤って追加したチームの削除を想定した操作です。よろしいですか？')) return;
+  if(!confirm('本当によろしいですか？（最終確認）')) return;
+  const oldUrls=(team.roster||[]).map(p=>p.photoUrl).filter(Boolean);
+  if(team.teamPhotoUrl) oldUrls.push(team.teamPhotoUrl);
+  try{
+    const {error}=await sb.from('teams').delete().eq('name',teamName);
+    if(error) throw error;
+    TEAMS_ROSTER=TEAMS_ROSTER.filter(t=>t.name!==teamName);
+    renderAllTeamViews();
+    oldUrls.forEach(u=>deleteStorageFileByUrl(u));
+    alert('✅「'+teamName+'」を削除しました。');
+  }catch(err){ alert('❌ 削除に失敗しました：'+err.message); }
 }
 
 async function ensureTeamToken(team){
@@ -6679,8 +6792,9 @@ async function renameTeamPrompt(oldName){
   if(TEAMS_ROSTER.some(t=>t.name===newName)){ alert('❌ 同じ名前のチームがすでにあります。'); return; }
   if(!confirm('「'+oldName+'」を「'+newName+'」に変更します。\n過去に投稿された写真・応援メッセージのチーム表示も連動して更新されます。\nよろしいですか？')) return;
   try{
-    const teams=TEAMS_ROSTER.map(t=>t.name===oldName?{...t,name:newName}:t);
-    await saveTeamsRoster(teams);
+    const {error:rnErr}=await sb.from('teams').update({name:newName}).eq('name',oldName);
+    if(rnErr) throw rnErr;
+    TEAMS_ROSTER=TEAMS_ROSTER.map(t=>t.name===oldName?{...t,name:newName}:t);
     const {error:pErr}=await sb.from('photos').update({team:newName}).eq('team',oldName);
     if(pErr) console.warn('写真のチーム名連動更新エラー:',pErr.message);
     const {error:mErr}=await sb.from('messages').update({team:newName}).eq('team',oldName);
@@ -6808,22 +6922,27 @@ async function approveRosterSubmission(token){
         photoUrl:p.photoUrl||((match&&match.photoUrl)?match.photoUrl:undefined)
       };
     });
-    const teams=TEAMS_ROSTER.map(t=>{
-      if(t.editToken!==token) return t;
-      return {
-        ...t,
-        manager:sub.manager||t.manager||'',
-        coaches:sub.coaches||t.coaches||'',
-        roster:newRoster,
-        teamPhotoUrl:sub.teamPhotoUrl||t.teamPhotoUrl // 今回の提出に集合写真がなければ既存を維持
-      };
-    });
-    await saveTeamsRoster(teams);
-    await savePendingRoster(PENDING_ROSTER.filter(p=>p.token!==token));
+    const updatedFields={
+      manager:sub.manager||oldTeam.manager||'',
+      coaches:sub.coaches||oldTeam.coaches||'',
+      roster:newRoster,
+      teamPhotoUrl:sub.teamPhotoUrl||oldTeam.teamPhotoUrl // 今回の提出に集合写真がなければ既存を維持
+    };
+    // このチームの行だけをピンポイントで更新する（他チームの並行更新を巻き込まないため、
+    // TEAMS_ROSTER全体をsaveTeamsRosterで書き戻すのではなく対象行だけUPDATEする）
+    const {error:upErr}=await sb.from('teams').update({
+      manager:updatedFields.manager,
+      coaches:updatedFields.coaches,
+      roster:updatedFields.roster,
+      team_photo_url:updatedFields.teamPhotoUrl||null
+    }).eq('edit_token',token);
+    if(upErr) throw upErr;
+    TEAMS_ROSTER=TEAMS_ROSTER.map(t=>t.editToken===token?{...t,...updatedFields}:t);
+    await deletePendingSubmission(token);
     renderAllTeamViews();
     // 承認によって公開データが更新されたので、旧チームデータだけが使っていた写真
     // （新しいデータに引き継がれなかったもの）はここで安全に削除できる
-    const newTeam=teams.find(t=>t.editToken===token);
+    const newTeam=TEAMS_ROSTER.find(t=>t.editToken===token);
     const newUrls=new Set((newTeam&&newTeam.roster||[]).map(p=>p.photoUrl).filter(Boolean));
     if(newTeam&&newTeam.teamPhotoUrl) newUrls.add(newTeam.teamPhotoUrl);
     const oldUrls=(oldTeam.roster||[]).map(p=>p.photoUrl).filter(Boolean);
@@ -6839,7 +6958,7 @@ async function rejectRosterSubmission(token){
   if(!confirm('この提出内容を却下します。チーム側は同じリンクから再提出できます。よろしいですか？')) return;
   try{
     const sub=findPendingByToken(token);
-    await savePendingRoster(PENDING_ROSTER.filter(p=>p.token!==token));
+    await deletePendingSubmission(token);
     renderRosterPendingAdmin();
     // 却下された提出だけが持っていた写真（現行の公開ロスターには存在しないもの）を孤児化させずに削除
     if(sub){
@@ -7124,7 +7243,7 @@ async function submitTeamRoster(){
     const entry={ token:_tiCurrentToken, teamName:team.name, manager, coaches, roster, teamPhotoUrl, submittedAt:new Date().toISOString() };
     // 提出者（監督）は未ログイン（anon）のため、settingsへの直接upsertは
     // RLS（authenticated限定）で失敗する。SECURITY DEFINER RPC経由で
-    // DB内部でトークン照合のうえroster_pendingを更新する。
+    // DB内部でトークン照合のうえroster_submissionsを更新する。
     const {error}=await withTimeout(sb.rpc('submit_team_roster',{p_token:_tiCurrentToken, p_entry:entry}), 10000);
     if(error) throw error;
     // ローカル状態も同期（同一端末で管理画面を開いている場合の表示用）
