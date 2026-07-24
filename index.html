@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ＵＪＢ　ＦＵＳＩＯＮ　ＣＵＰ２０２６</title>
-     <meta name="robots" content="noindex, nofollow">
 <!-- OGPタグ：SNS・LINE等でリンクを共有した際のプレビュー表示用。
      クローラーはJSを実行しないため、この静的な値がそのまま表示される。
      管理画面で大会名・ロゴを変更した場合は、ここも合わせて更新して再デプロイが必要。 -->
@@ -2142,6 +2141,7 @@ img{
         <button class="reset-btn" onclick="confirmReset('photos')">🗑 写真</button>
         <button class="reset-btn" id="donationResetBtn" onclick="confirmReset('donation')">🗑 寄付金</button>
       </div>
+      <div style="font-size:11px;color:#888;line-height:1.6;margin-top:.6rem;">※「写真」以外は、R2ストレージ上の画像ファイル自体はリセット後も残ります（紐付け情報だけが消えます）。詳しい削除範囲は各ボタン押下時の確認画面に表示されます。</div>
     </div>
 
     <!-- パスワード変更エリア -->
@@ -6094,10 +6094,22 @@ const RESET_LABELS={
   info:'大会設定',cheers:'応援メッセージ（承認済み・未承認）',
   photos:'写真（承認済み・未承認）',donation:'寄付金データ'
 };
+// 各リセット項目で実際に何が消えるかの詳細説明。
+// 特に「R2の実ファイルまで消えるか」はボタンごとに挙動が異なるため、誤解を防ぐため明記する。
+const RESET_DETAILS={
+  games:'・試合結果データ（gamesテーブル）をすべて削除します。',
+  players:'・選手名簿データ（teamsテーブル：選手名・学年・背番号・ポジション・将来の夢・写真URLなど）をすべて削除します。'
+    +'<br>⚠️写真ファイル自体はR2ストレージに残りますが、紐付け情報が消えるため実質探し出せなくなります。事前にバックアップを推奨します。',
+  info:'・大会設定を初期値に戻し、大会情報ページの掲載画像リストをクリアします。'
+    +'<br>⚠️画像ファイル自体はR2ストレージに残りますが、紐付けが切れます。',
+  cheers:'・応援メッセージ（承認済み・未承認とも）をすべて削除します（復元不可）。',
+  photos:'・写真データベースの記録と、R2ストレージ上の写真ファイル本体の両方を完全に削除します（復元不可）。',
+  donation:'・寄付者データをすべて削除し、寄付目標金額を初期値（100万円）に戻します。'
+};
 
 function confirmReset(target){
   _resetTarget=target;
-  document.getElementById('resetModalLabel').textContent=`「${RESET_LABELS[target]}」を削除します。`;
+  document.getElementById('resetModalLabel').innerHTML=`<div>「${RESET_LABELS[target]}」を削除します。</div><div style="margin-top:.5rem;font-size:12px;color:#666;line-height:1.6;">${RESET_DETAILS[target]}</div>`;
   document.getElementById('resetPw1').value='';
   document.getElementById('resetPw2').value='';
   document.getElementById('resetPw1Error').style.display='none';
