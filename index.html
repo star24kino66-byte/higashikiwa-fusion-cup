@@ -1784,6 +1784,12 @@ img{
             <option value="16">16チーム</option>
           </select>
         </div>
+        <div class="admin-form-row" id="blockThirdPlaceRow" style="align-items:center;">
+          <label style="font-size:12px;color:#555;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="blockThirdPlace" style="width:16px;height:16px;">
+            3位決定戦を行う（準決勝敗者同士で対戦し、1〜4位まで順位を決定）
+          </label>
+        </div>
         <div id="blockLeagueRow" style="display:none;">
           <textarea id="blockLeagueTeams" placeholder="チーム名を1行に1つずつ入力（例：&#10;東岐波A&#10;東岐波B&#10;〇〇クラブ）" style="width:100%;box-sizing:border-box;font-size:13px;padding:8px;border:1px solid #ddd;border-radius:8px;min-height:90px;resize:vertical;"></textarea>
           <div style="font-size:11px;color:#888;margin-top:4px;">3チーム以上を入力してください。総当たりの対戦カードを自動で作成します。</div>
@@ -7728,6 +7734,7 @@ async function addGame(){
 function toggleBlockFormatUI(){
   const format=document.getElementById('blockFormat').value;
   document.getElementById('blockKnockoutRow').style.display=(format==='league')?'none':'flex';
+  document.getElementById('blockThirdPlaceRow').style.display=(format==='league')?'none':'flex';
   document.getElementById('blockLeagueRow').style.display=(format==='league')?'block':'none';
 }
 
@@ -7746,7 +7753,11 @@ async function createBlock(){
     bracket=generateLeagueMatches(teams);
   } else {
     const teamCount=parseInt(document.getElementById('blockTeamCount').value);
+    const wantThirdPlace=document.getElementById('blockThirdPlace').checked;
     bracket=generateBracket(teamCount);
+    if(wantThirdPlace){
+      bracket.push({round:'3位決定戦',matches:[{id:'m3rd_0',top:null,bottom:null,topFirst:true}],isPlacement:true});
+    }
   }
 
   try{
@@ -7914,7 +7925,11 @@ function renderLeagueStandings(block, editable){
 
 function renderBlockTournament(block, editable=false){
   const bracket=typeof block.bracket==='string'?JSON.parse(block.bracket):block.bracket;
-  const rounds=bracket||[];
+  // 3位決定戦ラウンドは「勝者が次に進む」通常のトーナメント進行と構造が異なる（決勝と並行する別枠）ため、
+  // 既存の括弧描画ロジック（ラウンドごとに試合数が半分になっていく前提）には含めず、別途最後に描画する。
+  const allRounds=bracket||[];
+  const thirdPlaceRound=allRounds.find(r=>r.isPlacement)||null;
+  const rounds=allRounds.filter(r=>!r.isPlacement);
   const blockGames=GAMES.filter(g=>g.block_id===block.id);
 
   function getMatchInfo(m){
@@ -8158,8 +8173,41 @@ function renderBlockTournament(block, editable=false){
   }
   spHtml+=`</div>`;
 
+  // 3位決定戦・順位表示（決勝と並行する別枠のため、既存の括弧描画とは別に組み立てる）
+  let thirdPlaceHtml='';
+  if(thirdPlaceRound){
+    const tpm=thirdPlaceRound.matches[0];
+    const {totalA:tpA,totalB:tpB,aWon:tpAWon,bWon:tpBWon}=getMatchInfo(tpm);
+    thirdPlaceHtml+=`<div style="margin-top:14px;padding-top:12px;border-top:1px dashed #ddd;">
+      <div class="bt-sp-round-label">🥉 3位決定戦</div>
+      <div class="bt-sp-match">
+        <div class="bt-sp-teams">
+          ${teamCell(tpm.top,tpAWon,tpA,'top',block.id,thirdPlaceRound.round,0,editable)}
+          <div class="bt-vs">vs</div>
+          ${teamCell(tpm.bottom,tpBWon,tpB,'bottom',block.id,thirdPlaceRound.round,0,editable)}
+        </div>
+      </div>
+    </div>`;
+    if(finalRound&&finalRound.matches.length===1){
+      const fm2=finalRound.matches[0];
+      const {aWon:fAWon,bWon:fBWon}=getMatchInfo(fm2);
+      const champion=fAWon?fm2.top:(fBWon?fm2.bottom:null);
+      const runnerUp=fAWon?fm2.bottom:(fBWon?fm2.top:null);
+      const third=tpAWon?tpm.top:(tpBWon?tpm.bottom:null);
+      const fourth=tpAWon?tpm.bottom:(tpBWon?tpm.top:null);
+      if(champion&&third){
+        thirdPlaceHtml+=`<div style="margin-top:10px;font-size:12.5px;line-height:1.9;background:#f8f9fb;border-radius:8px;padding:8px 12px;">
+          <div>🥇 1位：<b>${esc(champion)}</b></div>
+          <div>🥈 2位：${esc(runnerUp||'')}</div>
+          <div>🥉 3位：${esc(third)}</div>
+          <div>4位：${esc(fourth||'')}</div>
+        </div>`;
+      }
+    }
+  }
+
   const saveBtn=editable?`<button onclick="saveBlockBracket('${block.id}')" style="width:100%;margin-top:8px;padding:7px;border-radius:8px;border:1px solid #1a3260;background:#fff;color:#1a3260;font-size:12px;cursor:pointer;">💾 修正を保存</button>`:'';
-  return `<div class="bt-wrap">${pcHtml}${spHtml}${saveBtn}</div>`;
+  return `<div class="bt-wrap">${pcHtml}${spHtml}${thirdPlaceHtml}${saveBtn}</div>`;
 }
 
 function inlineBracketEdit(blockId,round,matchIdx,side,value){
@@ -8203,7 +8251,7 @@ function populateBlockSelect(){
 }
 
 // トーナメント方式の「ラウンド」選択肢（固定）
-const KNOCKOUT_ROUND_OPTIONS='<option value="1回戦">1回戦</option><option value="2回戦">2回戦</option><option value="準々決勝">準々決勝</option><option value="準決勝">準決勝</option><option value="決勝">決勝</option>';
+const KNOCKOUT_ROUND_OPTIONS='<option value="1回戦">1回戦</option><option value="2回戦">2回戦</option><option value="準々決勝">準々決勝</option><option value="準決勝">準決勝</option><option value="決勝">決勝</option><option value="3位決定戦">3位決定戦</option>';
 
 function onBlockChange(){
   const blockId=document.getElementById('gBlock').value;
@@ -8285,6 +8333,7 @@ async function autoAdvanceWinner(blockId,matchId,teamA,teamB,scoreA,scoreB){
     const totalB=sumInnings(scoreB);
     if(totalA===totalB) return;
     const winner=totalA>totalB?teamA:teamB;
+    const loser=totalA>totalB?teamB:teamA;
     // キャッシュ済みBLOCKSではなく、更新直前にSupabaseから最新のbracketを取得する
     // （他端末が直前にブラケットを編集していた場合の上書き事故を減らすため）
     const {data:blockRow,error:fetchErr}=await sb.from('tournament_blocks').select('bracket').eq('id',blockId).single();
@@ -8294,10 +8343,21 @@ async function autoAdvanceWinner(blockId,matchId,teamA,teamB,scoreA,scoreB){
     bracket.forEach((r,ri)=>{ r.matches.forEach((m,mi)=>{ if(m.id===matchId){foundRoundIdx=ri;foundMatchIdx=mi;} }); });
     if(foundRoundIdx===-1) return;
     const nextRoundIdx=foundRoundIdx+1;
-    if(nextRoundIdx>=bracket.length) return;
-    const nextMatchIdx=Math.floor(foundMatchIdx/2);
     const side=foundMatchIdx%2===0?'top':'bottom';
-    bracket[nextRoundIdx].matches[nextMatchIdx][side]=winner;
+    let changed=false;
+    // 通常の勝者繰り上げ（次のラウンドが「3位決定戦」でない限り、常に次ラウンドへ繰り上げる）
+    if(nextRoundIdx<bracket.length && !bracket[nextRoundIdx].isPlacement){
+      const nextMatchIdx=Math.floor(foundMatchIdx/2);
+      bracket[nextRoundIdx].matches[nextMatchIdx][side]=winner;
+      changed=true;
+    }
+    // 準決勝（＝2試合で構成されるラウンド）の場合は、敗者を3位決定戦へ繰り上げる
+    // （4/8/16チームいずれの規模でも、決勝の1つ前＝2試合のラウンドが準決勝に該当する）
+    if(bracket[foundRoundIdx].matches.length===2){
+      const thirdPlaceRound=bracket.find(r=>r.isPlacement);
+      if(thirdPlaceRound){ thirdPlaceRound.matches[0][side]=loser; changed=true; }
+    }
+    if(!changed) return;
     const {error}=await sb.from('tournament_blocks').update({bracket:JSON.stringify(bracket)}).eq('id',blockId);
     if(error) console.error('自動繰り上げエラー:',error.message);
   } catch(e){ console.error('autoAdvanceWinner例外:',e); }
