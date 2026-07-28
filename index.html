@@ -7120,7 +7120,7 @@ function tiAddRow(data){
   const gradeInput=makeField('学年','','例：6年');
   const nameInput=makeField('氏名（必須）','','例：田中一郎',true);
   const batThrowInput=makeField('打/投','','例：右投右打');
-  const posInput=makeField('守備','','例：投手');
+  const posInput=makeField('守備','','例：投手・捕手');
 
   // キャプテンはON/OFFのチェックボックス（以前は自由入力欄で表記がバラつく問題があったため統一）
   const captainBox=document.createElement('div');
@@ -7369,7 +7369,10 @@ function renderTeamPlayerCards(teamName){
         </div>`
       :'';
     // 写真を主役に大きく表示（案B）。番号と学年は写真上にオーバーレイ
-    const posLine=[p.pos,p.batThrow].filter(Boolean).map(esc).join('・');
+    // ポジション欄は「、」区切りで複数入力される想定だが、表示上は「・」区切り・打投の前だけ「、」にする
+    // （スタッフの入力データを直接書き換えず、表示時にのみ変換するので既存データもそのまま反映される）
+    const posText=(p.pos||'').replace(/、/g,'・');
+    const posLine=[posText,p.batThrow].filter(Boolean).map(esc).join('、');
     card.innerHTML=`
       <div class="top">
         <div class="number">${esc(p.num)||'?'}</div>
