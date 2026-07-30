@@ -5224,7 +5224,7 @@ function renderPendingPhotoList(){
     const dt=p.submittedAt?new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
     html+=`<tr>
       <td class="p-check"><input type="checkbox" class="photo-check" data-id="${esc(p._id)}"></td>
-      <td class="p-to">${no?`<span class="row-no">${no}</span>`:''}${esc(p.team||'')}</td>
+      <td class="p-to">${no?`<span class="row-no">${no}</span>`:''}${esc(p.team||'')}${(p.player&&p.player!=='（チーム全体）')?`<br><span style="font-size:11px;color:#888;">選手：${esc(p.player)}</span>`:''}</td>
       <td class="p-from">${esc(p.author||'-')}</td>
       <td class="p-thumb">${thumb}</td>
       <td class="p-title"><b>${esc(p.n||'無題')}</b><br><span class="pending-tag">${esc(catLabel[p.cat]||p.cat)}</span></td>
@@ -5427,7 +5427,7 @@ function renderApprovedPhotoList(){
     const thumb=(thumbSrc&&(thumbSrc.startsWith('data:')||thumbSrc.startsWith('http')))?`<img src="${esc(thumbSrc)}" data-full="${esc(p.thumb||'')}" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`:'<span class="p-noimg">📷</span>';
     const dt=p.submittedAt?new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
     html+=`<tr class="${isBest?'is-best':''}">
-      <td class="p-to">${no?`<span class="row-no">${no}</span>`:''}${esc(p.team||'')}</td>
+      <td class="p-to">${no?`<span class="row-no">${no}</span>`:''}${esc(p.team||'')}${(p.player&&p.player!=='（チーム全体）')?`<br><span style="font-size:11px;color:#888;">選手：${esc(p.player)}</span>`:''}</td>
       <td class="p-from">${esc(p.author||'-')}</td>
       <td class="p-thumb">${thumb}</td>
       <td class="p-title"><b>${esc(p.n||'無題')}</b><br><span class="pending-tag">${esc(catIcon[p.cat]||'')} ${esc(catLabel[p.cat]||p.cat)}</span></td>
