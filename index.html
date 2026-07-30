@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -424,6 +425,7 @@ body{font-family:'Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;background:v
 .donor-card .dc-icon{font-size:15px;flex-shrink:0;margin-top:1px;}
 .dc-name{font-size:12px;font-weight:600;color:#333;display:block;}
 .dc-note{font-size:10.5px;color:#777;display:block;margin-top:2px;line-height:1.4;}
+.dc-date{font-size:9px;color:#aaa;display:block;margin-top:1px;}
 
 .sponsor-section-title{font-size:11px;font-weight:700;letter-spacing:.05em;color:#888;margin:0 0 .5rem;text-transform:uppercase;}
 .sponsor-card{display:flex;align-items:center;gap:10px;flex-shrink:0;padding:8px 14px;min-width:200px;}
@@ -694,6 +696,7 @@ img.clickable-photo{cursor:zoom-in;}
 .photo-modal-card-name{font-size:12px;font-weight:700;color:#333;line-height:1.3;}
 .photo-modal-card-team{font-size:10px;color:#888;}
 .photo-modal-card-author{font-size:10px;color:#999;}
+.photo-modal-card-date{font-size:10px;color:#aaa;}
 .photo-modal-card-foot{display:flex;align-items:center;justify-content:space-between;margin-top:4px;}
 .photo-modal-card-foot .lbtn{padding:3px 8px;font-size:11px;}
 .pending-count{background:#d63384;color:#fff;border-radius:999px;font-size:10px;font-weight:700;padding:1px 7px;margin-left:4px;}
@@ -801,6 +804,7 @@ img.clickable-photo{cursor:zoom-in;}
 .best9-pub-title{font-size:10px;font-weight:700;color:#1b2a4a;padding:4px 6px 1px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .best9-pub-title.wait-msg{white-space:normal;overflow:visible;text-overflow:clip;text-align:center;color:#9aa0b8;font-weight:600;padding:6px 6px 2px;}
 .best9-pub-team,.best9-pub-cat{font-size:9px;color:#888;padding:0 6px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.best9-pub-date{font-size:8.5px;color:#aaa;padding:0 6px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .best9-pub-empty-icon{height:72px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#ccc;}
 .best9-pub-empty-txt{font-size:10px;color:#bbb;text-align:center;padding-bottom:6px;}
 .top3-cat{font-size:9.5px;color:#888;display:block;margin-top:1px;}
@@ -1992,6 +1996,15 @@ img{
         <div id="bulkRosterPreviewArea" style="display:none;margin:.8rem 0;max-height:360px;overflow-y:auto;border:1px solid #eee;border-radius:8px;"></div>
         <button class="ubtn" id="bulkRosterConfirmBtn" onclick="confirmBulkRosterUpload()" disabled style="opacity:.5;">③ この内容で一括登録する</button>
         <div id="bulkRosterStatus" style="font-size:12px;color:#666;margin-top:.6rem;white-space:pre-line;"></div>
+      </div>
+
+      <div class="admin-form-card">
+        <div class="admin-form-title">④ 写真の一括バックアップ（ZIP保存）</div>
+        <p style="font-size:12px;color:#666;line-height:1.6;margin-bottom:.6rem;">
+          登録済みの選手写真・チーム集合写真をすべてZIPファイルとしてこの端末に保存します。「データリセット」等で消してしまう前の保管用にお使いください。ファイル名は「背番号_選手名」形式（チームごとにフォルダ分け）になっており、このZIP内のファイルはそのまま「③ 写真の一括登録」に使えます。
+        </p>
+        <button class="ubtn" id="rosterPhotoZipBtn" onclick="downloadRosterPhotosZip()">📦 全選手写真をZIPで保存する</button>
+        <div id="rosterPhotoZipStatus" style="font-size:12px;color:#666;margin-top:.6rem;white-space:pre-line;"></div>
       </div>
     </div>
 
@@ -3217,6 +3230,85 @@ async function downloadTeamsRosterCurrent(){
   XLSX.writeFile(wb,'選手名簿_現在データ.xlsx');
 }
 
+// ZIPファイル内のフォルダ名・ファイル名に使えない文字を置換する
+function sanitizeZipName(s){
+  return String(s||'').replace(/[\\/:*?"<>|]/g,'_').trim()||'unnamed';
+}
+// 選手写真・チーム集合写真をすべてR2から取得し、ZIPファイルとしてダウンロードする。
+// ファイル名は「③ 写真の一括登録」のファイル名マッチング（先頭の背番号で照合）と同じ規則にしてあるので、
+// このZIPを解凍してそのまま再登録に使える（バックアップ兼リストア用データ）。
+async function downloadRosterPhotosZip(){
+  if(typeof JSZip==='undefined'){ alert('ZIP機能の読み込みに失敗しました。ページを再読み込みしてからもう一度お試しください。'); return; }
+  const teams=(TEAMS_ROSTER||[]).filter(t=>(t.roster&&t.roster.length>0)||t.teamPhotoUrl);
+  if(teams.length===0){ alert('バックアップ対象の選手データがありません。'); return; }
+
+  const targets=[]; // {team, folder, filename, url}
+  teams.forEach(t=>{
+    const folder=sanitizeZipName(t.name);
+    if(t.teamPhotoUrl) targets.push({team:t.name, folder, filename:'team_'+folder, url:t.teamPhotoUrl});
+    (t.roster||[]).forEach(p=>{
+      if(p.photoUrl){
+        const prefix=p.num?String(p.num):'noNum';
+        targets.push({team:t.name, folder, filename:prefix+'_'+sanitizeZipName(p.name||'選手'), url:p.photoUrl});
+      }
+    });
+  });
+  if(targets.length===0){ alert('登録されている写真がありません（先に写真を登録してください）。'); return; }
+
+  const btn=document.getElementById('rosterPhotoZipBtn');
+  const statusEl=document.getElementById('rosterPhotoZipStatus');
+  if(btn){ btn.disabled=true; btn.style.opacity='.5'; }
+  const zip=new JSZip();
+  let done=0; const failed=[];
+  for(const tgt of targets){
+    done++;
+    if(statusEl) statusEl.textContent=`写真を取得中… (${done}/${targets.length})`;
+    try{
+      const res=await fetch(tgt.url);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const blob=await res.blob();
+      const ext=extFromBlob(blob);
+      zip.folder(tgt.folder).file(tgt.filename+'.'+ext, blob);
+    }catch(e){
+      failed.push(tgt.team+' / '+tgt.filename);
+      console.warn('バックアップ用の写真取得に失敗:',tgt.url,e);
+    }
+  }
+  // 選手データ一覧のCSVも同梱（写真URLの参照付き）
+  const header=['チーム名','背番号','学年','氏名','打/投','守備','将来の夢','キャプテン','写真URL'];
+  const rows=[header];
+  teams.forEach(t=>{
+    if(t.teamPhotoUrl) rows.push([t.name,'','','（集合写真）','','','','',t.teamPhotoUrl]);
+    (t.roster||[]).forEach(p=>{
+      rows.push([t.name,p.num||'',p.grade||'',p.name||'',p.batThrow||'',p.pos||'',p.dream||'',p.captain?'主将':'',p.photoUrl||'']);
+    });
+  });
+  const csvBody=rows.map(r=>r.map(csvEscapeCell).join(',')).join('\r\n');
+  zip.file('選手データ一覧.csv','\uFEFF'+csvBody);
+
+  if(statusEl) statusEl.textContent='ZIPファイルを作成中…';
+  try{
+    const content=await zip.generateAsync({type:'blob'});
+    const ymd=new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(content);
+    a.download=`選手写真バックアップ_${ymd}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }catch(e){
+    alert('ZIPファイルの作成に失敗しました：'+e.message);
+  }
+  if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+  if(failed.length){
+    if(statusEl) statusEl.textContent=`完了：${targets.length-failed.length}枚を保存、${failed.length}枚は取得に失敗しました（下記）。`;
+    alert('以下の写真は取得できずZIPに含まれませんでした（通信エラーまたはアクセス制限の可能性があります）：\n'+failed.join('\n'));
+  }else{
+    if(statusEl) statusEl.textContent=`✅ ${targets.length}枚の写真をZIPに保存しました。`;
+  }
+}
+
 // 大会要綱（Supabase settings key: 'tournament_info'）
 let TOURNAMENT_INFO=[];
 function getDefaultTournamentInfo(){
@@ -3614,12 +3706,14 @@ function renderBest9Grid(){
     const badgeLongCls=(catName&&catName.length>=7)?' badge-long':'';
     const titleHtml=isDummy?'投稿をお待ちしています！':(photo.n||'');
     const teamHtml=isDummy?'':(photo.team||'');
+    const dateHtml=(!isDummy&&photo.submittedAt)?new Date(photo.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+' 投稿':'';
     card.innerHTML=`
       <div class="best9-pub-badge${badgeLongCls}">${catIco} ${catName}</div>
       ${imgHtml}
       ${(!isDummy&&photoLabel(photo.seqNo))?`<div class="best9-pub-no"><span class="row-no">${photoLabel(photo.seqNo)}</span></div>`:''}
       <div class="best9-pub-title${isDummy?' wait-msg':''}">${titleHtml}</div>
-      <div class="best9-pub-team">${teamHtml}</div>`;
+      <div class="best9-pub-team">${teamHtml}</div>
+      ${dateHtml?`<div class="best9-pub-date">${dateHtml}</div>`:''}`;
     if(isDummy) card.classList.add('is-dummy');
     grid1.appendChild(card);
   });
@@ -3643,12 +3737,14 @@ function renderBest9Grid(){
       :`<div class="best9-pub-emoji">📷</div>`;
     const titleHtml=isDummy?'投稿をお待ちしています！':(p.n||'');
     const catHtml=isDummy?'':(catLabel[p.cat]||p.team||'');
+    const dateHtml=(!isDummy&&p.submittedAt)?new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+' 投稿':'';
     card.innerHTML=`
       <div class="best9-pub-badge like-badge">${likeMedals[i]} ${i+1}位</div>
       ${imgHtml}
       ${(!isDummy&&photoLabel(p.seqNo))?`<div class="best9-pub-no"><span class="row-no">${photoLabel(p.seqNo)}</span></div>`:''}
       <div class="best9-pub-title${isDummy?' wait-msg':''}">${titleHtml}</div>
-      <div class="best9-pub-cat">${catHtml}</div>`;
+      <div class="best9-pub-cat">${catHtml}</div>
+      ${dateHtml?`<div class="best9-pub-date">${dateHtml}</div>`:''}`;
     if(isDummy) card.classList.add('is-dummy');
     grid2.appendChild(card);
   });
@@ -3680,7 +3776,7 @@ function buildDonorRow(trackId,list){
   [...list,...list].forEach(d=>{
     const card=document.createElement('div');
     card.className='donor-card';
-    card.innerHTML=`<div><span class="dc-name">${esc(d.n)}</span><span class="dc-note">${esc(d.note)}</span></div>`;
+    card.innerHTML=`<div><span class="dc-name">${esc(d.n)}</span><span class="dc-note">${esc(d.note)}</span>${d.date?`<span class="dc-date">${d.date}</span>`:''}</div>`;
     track.appendChild(card);
   });
 }
@@ -3688,7 +3784,8 @@ function currentDonorDisplayList(){
   return DONORS_EXTRA.filter(d=>d.type==='donor'||!d.type).map(d=>({
     icon:'💐',
     n:d.name,
-    note:d.note||'ご寄付ありがとうございます。'
+    note:d.note||'ご寄付ありがとうございます。',
+    date:d.createdAt?new Date(d.createdAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):''
   }));
 }
 function rebuildDonorRows(){
@@ -4142,6 +4239,7 @@ function renderPhotoModalList(keepPage){
     const k=p.cat+'_'+p.idx,lk=liked[k];
     const teamStr=p.team?`<div class="photo-modal-card-team">チーム：${esc(p.team)}</div>`:'';
     const authorStr=p.author?`<div class="photo-modal-card-author">投稿者：${esc(p.author)}</div>`:'';
+    const dateStr=p.submittedAt?`<div class="photo-modal-card-date">${new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 投稿</div>`:'';
     const bestBadge=p.isBest?`<div class="best-badge">🏆 ${esc(catLabel[p.cat]||p.cat)} 受賞</div>`:'';
     const modalThumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.e;
     const imgHtml=(modalThumbSrc&&(modalThumbSrc.startsWith('data:')||modalThumbSrc.startsWith('http')))
@@ -4156,6 +4254,7 @@ function renderPhotoModalList(keepPage){
         ${teamStr}
         ${authorStr}
         <div class="photo-modal-card-foot">
+          ${dateStr}
           <button class="lbtn${lk?' liked':''}" onclick="tl('${esc(p.cat)}',${p.idx})">👍 <span>${p.l}</span></button>
         </div>
       </div>
@@ -4273,7 +4372,8 @@ function mergeApprovedPhotos(){
         team:p.team,
         l:p.l||0,
         _id:p._id,
-        seqNo:p.seqNo
+        seqNo:p.seqNo,
+        submittedAt:p.submittedAt
       });
     }
   });
@@ -5281,17 +5381,19 @@ function renderApprovedPhotoList(){
   if(_approvedPhotoPage<0) _approvedPhotoPage=0;
   const pageItems=sorted.slice(_approvedPhotoPage*ADMIN_PHOTO_PAGE_SIZE,_approvedPhotoPage*ADMIN_PHOTO_PAGE_SIZE+ADMIN_PHOTO_PAGE_SIZE);
   html+=`<table class="photo-table photo-table--approved">
-  <thead><tr><th>宛先</th><th>投稿者</th><th>写真・タイトル・賞</th><th>いいね・状態・操作</th></tr></thead><tbody>`;
+  <thead><tr><th>宛先</th><th>投稿者</th><th>写真・タイトル・賞</th><th>日時</th><th>いいね・状態・操作</th></tr></thead><tbody>`;
   pageItems.forEach((p,idx)=>{
     const no=photoLabel(p.seqNo);
     const isBest=bestShots[p.cat]===p._id;
     const thumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb;
     const thumb=(thumbSrc&&(thumbSrc.startsWith('data:')||thumbSrc.startsWith('http')))?`<img src="${esc(thumbSrc)}" data-full="${esc(p.thumb||'')}" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`:'<span class="p-noimg">📷</span>';
+    const dt=p.submittedAt?new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
     html+=`<tr class="${isBest?'is-best':''}">
       <td class="p-to">${no?`<span class="row-no">${no}</span>`:''}${esc(p.team||'')}</td>
       <td class="p-from">${esc(p.author||'-')}</td>
       <td class="p-thumb">${thumb}</td>
       <td class="p-title"><b>${esc(p.n||'無題')}</b><br><span class="pending-tag">${esc(catIcon[p.cat]||'')} ${esc(catLabel[p.cat]||p.cat)}</span></td>
+      <td class="p-date">${dt}</td>
       <td class="p-act">
         <span class="p-likes">👍 ${p.l||0}</span>
         <span class="p-status" style="color:${isBest?'#c9a227':'#5cb87a'};">${isBest?'🏆選定中':'掲載中'}</span>
@@ -7120,7 +7222,7 @@ function tiAddRow(data){
   const gradeInput=makeField('学年','','例：6年');
   const nameInput=makeField('氏名（必須）','','例：田中一郎',true);
   const batThrowInput=makeField('打/投','','例：右投右打');
-  const posInput=makeField('守備','','例：投手・捕手');
+  const posInput=makeField('守備','','例：投手');
 
   // キャプテンはON/OFFのチェックボックス（以前は自由入力欄で表記がバラつく問題があったため統一）
   const captainBox=document.createElement('div');
@@ -7369,10 +7471,7 @@ function renderTeamPlayerCards(teamName){
         </div>`
       :'';
     // 写真を主役に大きく表示（案B）。番号と学年は写真上にオーバーレイ
-    // ポジション欄は「、」区切りで複数入力される想定だが、表示上は「・」区切り・打投の前だけ「、」にする
-    // （スタッフの入力データを直接書き換えず、表示時にのみ変換するので既存データもそのまま反映される）
-    const posText=(p.pos||'').replace(/、/g,'・');
-    const posLine=[posText,p.batThrow].filter(Boolean).map(esc).join('、');
+    const posLine=[p.pos,p.batThrow].filter(Boolean).map(esc).join('・');
     card.innerHTML=`
       <div class="top">
         <div class="number">${esc(p.num)||'?'}</div>
