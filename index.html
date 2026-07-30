@@ -3233,6 +3233,24 @@ async function downloadTeamsRosterCurrent(){
 function sanitizeZipName(s){
   return String(s||'').replace(/[\\/:*?"<>|]/g,'_').trim()||'unnamed';
 }
+function _zipSleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+// r2.devの公開URLは開発用途向けでレート制限がかかることがあるため、
+// 失敗時は少し待って最大2回まで再試行する（backoff: 800ms→1800ms）
+async function fetchWithRetry(url,retries=2){
+  const delays=[800,1800];
+  let lastErr;
+  for(let i=0;i<=retries;i++){
+    try{
+      const res=await fetch(url);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return res;
+    }catch(e){
+      lastErr=e;
+      if(i<retries) await _zipSleep(delays[i]||1800);
+    }
+  }
+  throw lastErr;
+}
 // 選手写真・チーム集合写真をすべてR2から取得し、ZIPファイルとしてダウンロードする。
 // ファイル名は「③ 写真の一括登録」のファイル名マッチング（先頭の背番号で照合）と同じ規則にしてあるので、
 // このZIPを解凍してそのまま再登録に使える（バックアップ兼リストア用データ）。
@@ -3263,14 +3281,13 @@ async function downloadRosterPhotosZip(){
     done++;
     if(statusEl) statusEl.textContent=`写真を取得中… (${done}/${targets.length})`;
     try{
-      const res=await fetch(tgt.url);
-      if(!res.ok) throw new Error('HTTP '+res.status);
+      const res=await fetchWithRetry(tgt.url);
       const blob=await res.blob();
       const ext=extFromBlob(blob);
       zip.folder(tgt.folder).file(tgt.filename+'.'+ext, blob);
     }catch(e){
       failed.push(tgt.team+' / '+tgt.filename);
-      console.warn('バックアップ用の写真取得に失敗:',tgt.url,e);
+      console.warn('バックアップ用の写真取得に失敗（リトライ後も失敗）:',tgt.url,e);
     }
   }
   // 選手データ一覧のCSVも同梱（写真URLの参照付き）
