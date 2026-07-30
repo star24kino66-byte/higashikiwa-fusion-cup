@@ -714,7 +714,7 @@ img.clickable-photo{cursor:zoom-in;}
 
 /* 応援メッセージ：宛先＋投稿者 / メッセージ / 日時＋操作 */
 .cheer-table tbody tr{grid-template-columns:auto 1fr auto;grid-template-areas:"check to from" "msg msg msg" "date date act";}
-.cheer-table--approved tbody tr{grid-template-columns:1fr auto;grid-template-areas:"to from" "msg msg" "act act";}
+.cheer-table--approved tbody tr{grid-template-columns:1fr auto;grid-template-areas:"to from" "msg msg" "date act";}
 .cheer-table .c-check{grid-area:check;align-self:center;}
 .row-no{display:inline-block;font-size:9px;font-weight:600;color:#aab0c0;background:none;padding:0;margin-right:4px;vertical-align:middle;letter-spacing:.02em;}
 .cheer-table .c-to{grid-area:to;font-size:13px;align-self:center;}
@@ -725,7 +725,7 @@ img.clickable-photo{cursor:zoom-in;}
 
 /* 写真：宛先(チーム)＋投稿者 / 写真(2〜3行目にまたがり大きめ表示)＋タイトル・賞・日時・操作 */
 .photo-table tbody tr{grid-template-columns:auto 96px 1fr;grid-template-areas:"check to from" "thumb title title" "thumb date act";}
-.photo-table--approved tbody tr{grid-template-columns:96px 1fr;grid-template-areas:"to from" "thumb title" "thumb act";}
+.photo-table--approved tbody tr{grid-template-columns:96px 1fr;grid-template-areas:"to from" "thumb title" "thumb date" "thumb act";}
 .photo-table tbody tr.is-best{background:#fffdf0;border-color:#c9a227;}
 .photo-table .p-check{grid-area:check;align-self:center;}
 .photo-table .p-to{grid-area:to;font-size:11px;color:#888;align-self:center;}
@@ -4038,7 +4038,8 @@ function openPlayerCheersModal(teamName,playerName,playerId){
   msgs.forEach(c=>{
     const row=document.createElement('div');
     row.className='modal-row';
-    row.innerHTML=`<div class="cheer-msg">${msgLabel(c.seqNo)?`<span class="row-no">${msgLabel(c.seqNo)}</span>`:''}"${esc(c.msg)}"</div><div class="cheer-from" style="text-align:left;margin-top:3px;">${esc(c.from)}より</div>`;
+    const dt=c.submittedAt?new Date(c.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+    row.innerHTML=`<div class="cheer-msg">${msgLabel(c.seqNo)?`<span class="row-no">${msgLabel(c.seqNo)}</span>`:''}"${esc(c.msg)}"</div><div class="cheer-from" style="text-align:left;margin-top:3px;">${esc(c.from)}より${dt?` ・ ${dt}`:''}</div>`;
     list.appendChild(row);
   });
   overlay.classList.add('open');
@@ -4104,10 +4105,12 @@ function renderMyPostsModal(){
       else if(pendingPhotos.some(p=>p._id===entry.id)){ statusLabel='⏳ 審査待ち'; statusColor='#c9a227'; }
     }
     const typeIcon=entry.type==='cheer'?'💬':'📸';
+    const dt=entry.submittedAt?new Date(entry.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
     html+=`<div class="modal-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
       <div style="min-width:0;flex:1;">
         <div style="font-size:11px;font-weight:700;color:${statusColor};margin-bottom:2px;">${statusLabel}</div>
         <div style="font-size:13px;color:#1a3260;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${typeIcon} ${esc(entry.label||'（無題）')}</div>
+        ${dt?`<div style="font-size:10px;color:#aaa;margin-top:2px;">${dt} 投稿</div>`:''}
       </div>
       <button class="pager-btn" style="flex-shrink:0;color:#c00;border-color:#f0c0c0;" onclick="deleteMyPost('${esc(entry.id)}')">🗑 削除</button>
     </div>`;
@@ -5493,7 +5496,7 @@ function renderBestNineAdmin(keepPage){
   pageItems.forEach(p=>{
     const isBest=p._id===bestId;
     const b9ThumbSrc=(p.thumbSmall&&(p.thumbSmall.startsWith('data:')||p.thumbSmall.startsWith('http')))?p.thumbSmall:p.thumb;
-    gridHtml+=`<div class="best9-photo-card${isBest?' is-best':''}" data-cat="${esc(catKey)}" data-pid="${esc(p._id)}" onclick="setBestShot(this.dataset.cat,this.dataset.pid)"><div class="best9-photo-wrap">${(b9ThumbSrc&&(b9ThumbSrc.startsWith('data:')||b9ThumbSrc.startsWith('http')))?`<img src="${esc(b9ThumbSrc)}" data-full="${esc(p.thumb||'')}" class="best9-thumb" onclick="event.stopPropagation();openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`:'<div class="best9-thumb-placeholder">📷</div>'}</div><div class="best9-photo-info"><div class="best9-photo-name">${esc(p.n||'無題')}</div><div class="best9-photo-meta">チーム：${esc(p.team||'不明')} ／ 👍${p.l||0}</div></div>${isBest?'<div class="best9-crown">🏆 選定中</div>':'<div class="best9-select-hint">タップで選定</div>'}</div>`;
+    gridHtml+=`<div class="best9-photo-card${isBest?' is-best':''}" data-cat="${esc(catKey)}" data-pid="${esc(p._id)}" onclick="setBestShot(this.dataset.cat,this.dataset.pid)"><div class="best9-photo-wrap">${(b9ThumbSrc&&(b9ThumbSrc.startsWith('data:')||b9ThumbSrc.startsWith('http')))?`<img src="${esc(b9ThumbSrc)}" data-full="${esc(p.thumb||'')}" class="best9-thumb" onclick="event.stopPropagation();openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`:'<div class="best9-thumb-placeholder">📷</div>'}</div><div class="best9-photo-info"><div class="best9-photo-name">${esc(p.n||'無題')}</div><div class="best9-photo-meta">チーム：${esc(p.team||'不明')} ／ 👍${p.l||0}</div>${p.submittedAt?`<div class="best9-photo-meta" style="color:#aaa;">${new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 投稿</div>`:''}</div>${isBest?'<div class="best9-crown">🏆 選定中</div>':'<div class="best9-select-hint">タップで選定</div>'}</div>`;
   });
   gridHtml+='</div>';
   if(totalPages>1){
@@ -5590,13 +5593,15 @@ function renderApprovedCheerList(){
   if(_approvedCheerPage<0) _approvedCheerPage=0;
   const pageItems=sorted.slice(_approvedCheerPage*ADMIN_CHEER_PAGE_SIZE,_approvedCheerPage*ADMIN_CHEER_PAGE_SIZE+ADMIN_CHEER_PAGE_SIZE);
   html+=`<table class="cheer-table cheer-table--approved">
-  <thead><tr style="background:#f0f2f8;"><th style="width:25%;">宛先</th><th>メッセージ</th><th style="width:72px;">投稿者</th><th>操作</th></tr></thead><tbody>`;
+  <thead><tr style="background:#f0f2f8;"><th style="width:25%;">宛先</th><th>メッセージ</th><th style="width:72px;">投稿者</th><th style="width:60px;">日時</th><th>操作</th></tr></thead><tbody>`;
   pageItems.forEach((c,idx)=>{
     const no=msgLabel(c.seqNo);
+    const dt=c.submittedAt?new Date(c.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
     html+=`<tr>
       <td class="c-to">${no?`<span class="row-no">${no}</span>`:''}<span style="font-size:10px;color:#888;">${esc(c.team||'')}</span><br><b>${esc(c.name)}</b>さんへ</td>
       <td class="c-msg">${esc(c.msg)}</td>
       <td class="c-from">${esc(c.from||'')}より</td>
+      <td class="c-date">${dt}</td>
       <td class="c-act"><button class="btn-reject" onclick="unpublishCheer('${esc(c._id)}')">取下</button></td>
     </tr>`;
   });
@@ -5990,6 +5995,7 @@ function renderAlbumAdmin(){
       <div style="flex:1;">
         <div style="font-size:13px;font-weight:700;">${p.title||''}</div>
         <div style="font-size:11px;color:#888;">${p.caption||''}</div>
+        ${p.created_at?`<div style="font-size:10px;color:#aaa;margin-top:2px;">${new Date(p.created_at).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 登録</div>`:''}
       </div>
       <span style="font-size:11px;color:#aaa;">${i+1}枚目</span>
       <button class="dr-del" onclick="deleteAlbumPhoto('${p.id}')" title="削除">✕</button>`;
