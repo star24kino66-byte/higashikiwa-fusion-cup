@@ -3234,14 +3234,26 @@ function sanitizeZipName(s){
   return String(s||'').replace(/[\\/:*?"<>|]/g,'_').trim()||'unnamed';
 }
 function _zipSleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-// r2.devの公開URLは開発用途向けでレート制限がかかることがあるため、
-// 失敗時は少し待って最大2回まで再試行する（backoff: 800ms→1800ms）
+// サイト表示時の<img>読み込みはOriginヘッダーを送らないため、R2はCORSヘッダー
+// (Access-Control-Allow-Origin)を付けずに応答し、その応答がCloudflareのエッジに
+// キャッシュされる。後からfetch()で同じURLを取得するとCORSヘッダー無しの
+// キャッシュ応答が返り、ブラウザにブロックされてしまう（表示済みの写真だけが
+// 失敗する症状の原因）。ZIP取得時はキャッシュキーを変えてR2本体まで到達させ、
+// CORSヘッダー付きの応答を得る。
+function zipFetchUrl(url,token){
+  try{
+    const u=new URL(url,location.href);
+    u.searchParams.set('zipdl',token);
+    return u.toString();
+  }catch(e){ return url; }
+}
+// 取得失敗時は少し待って最大2回まで再試行する（backoff: 800ms→1800ms）
 async function fetchWithRetry(url,retries=2){
   const delays=[800,1800];
   let lastErr;
   for(let i=0;i<=retries;i++){
     try{
-      const res=await fetch(url);
+      const res=await fetch(url,{mode:'cors',cache:'no-store'});
       if(!res.ok) throw new Error('HTTP '+res.status);
       return res;
     }catch(e){
@@ -3276,12 +3288,21 @@ async function downloadRosterPhotosZip(){
   const statusEl=document.getElementById('rosterPhotoZipStatus');
   if(btn){ btn.disabled=true; btn.style.opacity='.5'; }
   const zip=new JSZip();
+  const zipToken=Date.now().toString(36);
   let done=0; const failed=[];
   for(const tgt of targets){
     done++;
     if(statusEl) statusEl.textContent=`写真を取得中… (${done}/${targets.length})`;
     try{
-      const res=await fetchWithRetry(tgt.url);
+      let res;
+      try{
+        // まずキャッシュ回避URLで取得（CORSヘッダー無しのキャッシュ応答を避ける）
+        res=await fetchWithRetry(zipFetchUrl(tgt.url,zipToken));
+      }catch(e1){
+        // 保存先がクエリ付きURLを受け付けない等の場合に備え、元のURLでも試す
+        console.warn('キャッシュ回避URLでの取得に失敗、元URLで再試行:',tgt.url,e1);
+        res=await fetchWithRetry(tgt.url);
+      }
       const blob=await res.blob();
       const ext=extFromBlob(blob);
       zip.folder(tgt.folder).file(tgt.filename+'.'+ext, blob);
