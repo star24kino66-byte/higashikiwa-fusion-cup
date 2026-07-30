@@ -804,7 +804,6 @@ img.clickable-photo{cursor:zoom-in;}
 .best9-pub-title{font-size:10px;font-weight:700;color:#1b2a4a;padding:4px 6px 1px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .best9-pub-title.wait-msg{white-space:normal;overflow:visible;text-overflow:clip;text-align:center;color:#9aa0b8;font-weight:600;padding:6px 6px 2px;}
 .best9-pub-team,.best9-pub-cat{font-size:9px;color:#888;padding:0 6px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.best9-pub-date{font-size:8.5px;color:#aaa;padding:0 6px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .best9-pub-empty-icon{height:72px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#ccc;}
 .best9-pub-empty-txt{font-size:10px;color:#bbb;text-align:center;padding-bottom:6px;}
 .top3-cat{font-size:9.5px;color:#888;display:block;margin-top:1px;}
@@ -3706,14 +3705,12 @@ function renderBest9Grid(){
     const badgeLongCls=(catName&&catName.length>=7)?' badge-long':'';
     const titleHtml=isDummy?'投稿をお待ちしています！':(photo.n||'');
     const teamHtml=isDummy?'':(photo.team||'');
-    const dateHtml=(!isDummy&&photo.submittedAt)?new Date(photo.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+' 投稿':'';
     card.innerHTML=`
       <div class="best9-pub-badge${badgeLongCls}">${catIco} ${catName}</div>
       ${imgHtml}
       ${(!isDummy&&photoLabel(photo.seqNo))?`<div class="best9-pub-no"><span class="row-no">${photoLabel(photo.seqNo)}</span></div>`:''}
       <div class="best9-pub-title${isDummy?' wait-msg':''}">${titleHtml}</div>
-      <div class="best9-pub-team">${teamHtml}</div>
-      ${dateHtml?`<div class="best9-pub-date">${dateHtml}</div>`:''}`;
+      <div class="best9-pub-team">${teamHtml}</div>`;
     if(isDummy) card.classList.add('is-dummy');
     grid1.appendChild(card);
   });
@@ -3737,14 +3734,12 @@ function renderBest9Grid(){
       :`<div class="best9-pub-emoji">📷</div>`;
     const titleHtml=isDummy?'投稿をお待ちしています！':(p.n||'');
     const catHtml=isDummy?'':(catLabel[p.cat]||p.team||'');
-    const dateHtml=(!isDummy&&p.submittedAt)?new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+' 投稿':'';
     card.innerHTML=`
       <div class="best9-pub-badge like-badge">${likeMedals[i]} ${i+1}位</div>
       ${imgHtml}
       ${(!isDummy&&photoLabel(p.seqNo))?`<div class="best9-pub-no"><span class="row-no">${photoLabel(p.seqNo)}</span></div>`:''}
       <div class="best9-pub-title${isDummy?' wait-msg':''}">${titleHtml}</div>
-      <div class="best9-pub-cat">${catHtml}</div>
-      ${dateHtml?`<div class="best9-pub-date">${dateHtml}</div>`:''}`;
+      <div class="best9-pub-cat">${catHtml}</div>`;
     if(isDummy) card.classList.add('is-dummy');
     grid2.appendChild(card);
   });
