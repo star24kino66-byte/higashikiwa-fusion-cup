@@ -3776,7 +3776,7 @@ function buildDonorRow(trackId,list){
   [...list,...list].forEach(d=>{
     const card=document.createElement('div');
     card.className='donor-card';
-    card.innerHTML=`<div><span class="dc-name">${esc(d.n)}</span><span class="dc-note">${esc(d.note)}</span>${d.date?`<span class="dc-date">${d.date}</span>`:''}</div>`;
+    card.innerHTML=`<div><span class="dc-name">${esc(d.n)}</span><span class="dc-note">${esc(d.note)}</span></div>`;
     track.appendChild(card);
   });
 }
@@ -3982,7 +3982,8 @@ function renderCheerModalList(keepPage){
   if(_modalCheerPage<0) _modalCheerPage=0;
   const pageItems=filtered.slice(_modalCheerPage*MODAL_CHEER_PAGE_SIZE,_modalCheerPage*MODAL_CHEER_PAGE_SIZE+MODAL_CHEER_PAGE_SIZE);
   pageItems.forEach(c=>{
-    html+=`<div class="modal-row"><div class="cheer-to">${msgLabel(c.seqNo)?`<span class="row-no">${msgLabel(c.seqNo)}</span>`:''}<span class="cheer-team">${esc(c.team)}</span><span class="cheer-name">${esc(c.name)} さん</span></div><div class="cheer-msg" style="margin-top:3px;">${esc(c.msg)}</div><div class="cheer-from" style="text-align:left;margin-top:3px;">${esc(c.from)}より</div></div>`;
+    const dt=c.submittedAt?new Date(c.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+    html+=`<div class="modal-row"><div class="cheer-to">${msgLabel(c.seqNo)?`<span class="row-no">${msgLabel(c.seqNo)}</span>`:''}<span class="cheer-team">${esc(c.team)}</span><span class="cheer-name">${esc(c.name)} さん</span></div><div class="cheer-msg" style="margin-top:3px;">${esc(c.msg)}</div><div class="cheer-from" style="text-align:left;margin-top:3px;">${esc(c.from)}より${dt?` ・ ${dt}`:''}</div></div>`;
   });
   if(totalPages>1){
     html+=`<div class="pager-bar">
@@ -4025,7 +4026,7 @@ function openModal(type){
     dList.forEach(d=>{
       const row=document.createElement('div');
       row.className='modal-row';
-      row.innerHTML=`<div><span class="dc-name">${esc(d.n)}</span><span class="dc-note">${esc(d.note)}</span></div>`;
+      row.innerHTML=`<div><span class="dc-name">${esc(d.n)}</span><span class="dc-note">${esc(d.note)}</span>${d.date?`<span class="dc-date">${d.date}</span>`:''}</div>`;
       list.appendChild(row);
     });
   } else if(type==='sponsor'){
@@ -4034,7 +4035,8 @@ function openModal(type){
     spList.forEach(s=>{
       const row=document.createElement('div');
       row.className='modal-row';
-      row.innerHTML=`<div><span class="sponsor-name">${esc(s.name||s.n||'')}</span><span class="sponsor-msg">${esc(s.note||s.m||'')}</span></div>`;
+      const sDate=s.createdAt?new Date(s.createdAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+      row.innerHTML=`<div><span class="sponsor-name">${esc(s.name||s.n||'')}</span><span class="sponsor-msg">${esc(s.note||s.m||'')}</span>${sDate?`<span class="dc-date">${sDate}</span>`:''}</div>`;
       list.appendChild(row);
     });
   } else if(type==='photo'){
@@ -4389,7 +4391,7 @@ function mergeApprovedCheers(){
   // 自動的に反映される（追記のみだと取り下げ後も表示され続けてしまう不具合の対策）。
   CHEERS.length=0;
   approvedCheersExtra.forEach(c=>{
-    CHEERS.push({team:c.team||'応援',name:c.name,msg:c.msg,from:c.from,_id:c._id,seqNo:c.seqNo,playerId:c.playerId||null});
+    CHEERS.push({team:c.team||'応援',name:c.name,msg:c.msg,from:c.from,_id:c._id,seqNo:c.seqNo,playerId:c.playerId||null,submittedAt:c.submittedAt});
   });
 }
 function mergeApproved(){
