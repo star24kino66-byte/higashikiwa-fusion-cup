@@ -4229,6 +4229,7 @@ function renderGamesModalBlock(blockId){
 }
 
 let _modalPhotoCatFilter=''; // ''=すべての賞をまとめて表示
+let _modalPhotoTeamFilter=''; // ''=すべてのチーム
 const MODAL_PHOTO_PAGE_SIZE=10;
 let _modalPhotoPage=0;
 function changeModalPhotoPage(delta){
@@ -4241,10 +4242,18 @@ function renderPhotoModalList(keepPage){
   const title=document.getElementById('modalTitle');
   const totalCount=CATS.reduce((sum,[key])=>sum+((PH[key]||[]).length),0);
   if(title) title.textContent='投稿写真 一覧（全'+totalCount+'件）';
-  let html=`<div style="margin-bottom:10px;">
+  // チーム別の件数集計（賞・チームどちらのフィルタにも依存しない全体件数）
+  const teamCounts={};
+  CATS.forEach(([key])=>(PH[key]||[]).forEach(p=>{ if(p.team){ teamCounts[p.team]=(teamCounts[p.team]||0)+1; } }));
+  const teamNames=Object.keys(teamCounts).sort((a,b)=>a.localeCompare(b,'ja'));
+  let html=`<div style="margin-bottom:10px;display:flex;flex-direction:column;gap:6px;">
     <select id="modalPhotoCatSelect" style="width:100%;font-size:13px;padding:8px 10px;border:1px solid #d8dce8;border-radius:10px;background:#f8f9fb;color:#1a3260;font-weight:600;cursor:pointer;" onchange="_modalPhotoCatFilter=this.value;renderPhotoModalList();">
       <option value="">🏆 すべての賞（${totalCount}件）</option>
       ${CATS.map(([key,label,icon])=>`<option value="${key}" ${key===_modalPhotoCatFilter?'selected':''}>${icon} ${label}（${(PH[key]||[]).length}件）</option>`).join('')}
+    </select>
+    <select id="modalPhotoTeamSelect" style="width:100%;font-size:13px;padding:8px 10px;border:1px solid #d8dce8;border-radius:10px;background:#f8f9fb;color:#1a3260;font-weight:600;cursor:pointer;" onchange="_modalPhotoTeamFilter=this.value;renderPhotoModalList();">
+      <option value="">👥 すべてのチーム（${totalCount}件）</option>
+      ${teamNames.map(t=>`<option value="${esc(t)}" ${t===_modalPhotoTeamFilter?'selected':''}>${esc(t)}（${teamCounts[t]}件）</option>`).join('')}
     </select>
   </div>`;
   // 対象の賞（未選択なら全賞まとめて）の写真を集める
@@ -4256,6 +4265,8 @@ function renderPhotoModalList(keepPage){
       items.push({...p,idx:i,cat:catKey,isBest:!!(p._id&&p._id===bestId)});
     });
   });
+  // チームフィルタ（賞フィルタと組み合わせ可能）
+  if(_modalPhotoTeamFilter) items=items.filter(p=>p.team===_modalPhotoTeamFilter);
   // 賞の順番→ベスト優先→いいね数の順に並べる
   items.sort((a,b)=>{
     if(a.cat!==b.cat) return catsToShow.indexOf(a.cat)-catsToShow.indexOf(b.cat);
