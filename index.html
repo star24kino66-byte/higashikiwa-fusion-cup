@@ -803,7 +803,7 @@ img.clickable-photo{cursor:zoom-in;}
 .best9-pub-no{padding:4px 6px 0;}
 .best9-pub-title{font-size:10px;font-weight:700;color:#1b2a4a;padding:4px 6px 1px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .best9-pub-title.wait-msg{white-space:normal;overflow:visible;text-overflow:clip;text-align:center;color:#9aa0b8;font-weight:600;padding:6px 6px 2px;}
-.best9-pub-team,.best9-pub-cat{font-size:9px;color:#888;padding:0 6px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.best9-pub-team,.best9-pub-cat{font-size:9px;color:#888;padding:0 6px 4px;line-height:1.3;white-space:normal;overflow-wrap:break-word;}
 .best9-pub-empty-icon{height:72px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#ccc;}
 .best9-pub-empty-txt{font-size:10px;color:#bbb;text-align:center;padding-bottom:6px;}
 .top3-cat{font-size:9.5px;color:#888;display:block;margin-top:1px;}
@@ -3742,7 +3742,7 @@ function renderBest9Grid(){
     // 賞名が長い場合（例：ベストショット賞）はバッジのフォントを一段小さくして1行に収める
     const badgeLongCls=(catName&&catName.length>=7)?' badge-long':'';
     const titleHtml=isDummy?'投稿をお待ちしています！':(photo.n||'');
-    const teamHtml=isDummy?'':(photo.team||'')+((photo.player&&photo.player!=='（チーム全体）')?`　選手：${photo.player}`:'');
+    const teamHtml=isDummy?'':(photo.team||'')+((photo.player&&photo.player!=='（チーム全体）')?'・'+photo.player:'');
     card.innerHTML=`
       <div class="best9-pub-badge${badgeLongCls}">${catIco} ${catName}</div>
       ${imgHtml}
@@ -3771,7 +3771,7 @@ function renderBest9Grid(){
       ?`<img src="${pThumbSrc}" data-full="${p.thumb||''}" class="best9-pub-img clickable-photo" onclick="openLightbox(this.dataset.full||this.src)" onerror="imgRetry(this)">`
       :`<div class="best9-pub-emoji">📷</div>`;
     const titleHtml=isDummy?'投稿をお待ちしています！':(p.n||'');
-    const catHtml=isDummy?'':(catLabel[p.cat]||p.team||'')+((!isDummy&&p.player&&p.player!=='（チーム全体）')?`　選手：${p.player}`:'');
+    const catHtml=isDummy?'':(catLabel[p.cat]||p.team||'')+((!isDummy&&p.player&&p.player!=='（チーム全体）')?'・'+p.player:'');
     card.innerHTML=`
       <div class="best9-pub-badge like-badge">${likeMedals[i]} ${i+1}位</div>
       ${imgHtml}
@@ -4275,7 +4275,7 @@ function renderPhotoModalList(keepPage){
   html+='<div class="photo-modal-grid">';
   pageItems.forEach(p=>{
     const k=p.cat+'_'+p.idx,lk=liked[k];
-    const teamStr=p.team?`<div class="photo-modal-card-team">チーム：${esc(p.team)}${(p.player&&p.player!=='（チーム全体）')?`　選手：${esc(p.player)}`:''}</div>`:'';
+    const teamStr=p.team?`<div class="photo-modal-card-team">${esc(p.team)}${(p.player&&p.player!=='（チーム全体）')?'・'+esc(p.player):''}</div>`:'';
     const authorStr=p.author?`<div class="photo-modal-card-author">投稿者：${esc(p.author)}</div>`:'';
     const dateStr=p.submittedAt?`<div class="photo-modal-card-date">${new Date(p.submittedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 投稿</div>`:'';
     const bestBadge=p.isBest?`<div class="best-badge">🏆 ${esc(catLabel[p.cat]||p.cat)} 受賞</div>`:'';
