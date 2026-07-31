@@ -786,6 +786,7 @@ img.clickable-photo{cursor:zoom-in;}
 .period-before .period-notice-text b{color:#8a6800;}
 .period-after .period-notice-text b{color:#555;}
 .period-notice-text span{font-size:11px;color:#888;}
+.deadline-notice{font-size:12px;font-weight:700;color:#8a6800;background:#fff8ec;border:1px solid #f5c842;border-radius:8px;padding:.5rem .8rem;margin:0 0 .6rem;text-align:center;}
 .best9-description{display:flex;align-items:center;justify-content:center;gap:8px;margin:.4rem 0 .8rem;padding:.5rem .8rem;background:linear-gradient(90deg,#f0f4ff,#fff8f0);border-radius:10px;border:1px solid #dde3f5;}
 .best9-desc-item{font-size:12px;color:#1b2a4a;}
 .best9-desc-sep{font-size:14px;font-weight:700;color:#c9a227;}
@@ -1243,6 +1244,7 @@ img{
     </div>
     <div class="uf" id="cheerFormCard">
       <div class="ut">💬 応援メッセージを送る</div>
+      <div id="cheerDeadlineNotice" style="display:none;" class="deadline-notice"></div>
       <div id="cheerFormFields">
         <div class="notice-box" style="margin-bottom:.6rem;">
           ✅ 投稿いただいたメッセージは<b>承認後</b>に掲載します。内容によっては掲載を見送る場合があります。<br>
@@ -1301,6 +1303,7 @@ img{
     <button class="more-btn" onclick="openModal('photo')">すべての投稿写真を見る</button>
   <div class="uf">
     <div class="ut">📸 写真を投稿する</div>
+    <div id="photoDeadlineNotice" style="display:none;" class="deadline-notice"></div>
     <div id="photoPeriodNotice" style="display:none;" class="notice-box">⏰ フォトベスト9の受付期間外です。</div>
     <div id="photoFormFields">
       <div class="notice-box" style="margin-bottom:.6rem;">
@@ -6562,6 +6565,17 @@ function checkPeriods(){
     }
   }
   if(cheerAfterEl) cheerAfterEl.style.display=cAfterEnd?'block':'none';
+  const cheerDeadlineEl=document.getElementById('cheerDeadlineNotice');
+  if(cheerDeadlineEl){
+    if(cheerIn&&cHasEnd){
+      const d=new Date(cp.end);
+      const dateStr=d.toLocaleDateString('ja-JP',{month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      cheerDeadlineEl.textContent='⏰ 受付期間：'+dateStr+' まで';
+      cheerDeadlineEl.style.display='block';
+    } else {
+      cheerDeadlineEl.style.display='none';
+    }
+  }
   // フォトベスト9（セクション丸ごと制御）
   const p=PERIODS.photo;
   const now=new Date();
@@ -6587,6 +6601,17 @@ function checkPeriods(){
     }
   }
   if(afterEl) afterEl.style.display=afterEnd?'block':'none';
+  const photoDeadlineEl=document.getElementById('photoDeadlineNotice');
+  if(photoDeadlineEl){
+    if(inPeriod&&hasEnd){
+      const d=new Date(p.end);
+      const dateStr=d.toLocaleDateString('ja-JP',{month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      photoDeadlineEl.textContent='⏰ 受付期間：'+dateStr+' まで';
+      photoDeadlineEl.style.display='block';
+    } else {
+      photoDeadlineEl.style.display='none';
+    }
+  }
 }
 checkPeriods();
 // 画面を開きっぱなしのまま投稿期間の開始/終了時刻をまたいでも表示が追随するよう、1分間隔で再チェックする
