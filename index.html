@@ -789,8 +789,13 @@ img.clickable-photo{cursor:zoom-in;}
 .deadline-notice{font-size:12px;font-weight:700;color:#8a6800;background:#fff8ec;border:1px solid #f5c842;border-radius:8px;padding:.5rem .8rem;margin:0 0 .6rem;text-align:center;}
 .mvp-award-block{background:linear-gradient(90deg,#fff8f0,#f0f4ff);border:1px solid #e8c96a;border-radius:10px;padding:.6rem .9rem;margin:0 0 .6rem;}
 .mvp-award-blockname{font-size:11px;font-weight:700;color:#8a6800;margin-bottom:4px;}
-.mvp-award-row{font-size:13px;color:#1b2a4a;line-height:1.6;}
-.mvp-award-row b{color:#8a6800;}
+.mvp-award-row{display:flex;align-items:center;gap:14px;padding:6px 0;}
+.mvp-award-row+.mvp-award-row{border-top:1px solid #f0e6cf;margin-top:6px;padding-top:12px;}
+.mvp-award-info{min-width:0;flex:1;}
+.mvp-award-title{font-size:13px;font-weight:700;color:#8a6800;margin-bottom:2px;}
+.mvp-award-name{font-size:17px;font-weight:700;color:#1b2a4a;line-height:1.3;overflow-wrap:break-word;}
+.mvp-award-team{font-size:12px;color:#6b7280;margin-top:2px;overflow-wrap:break-word;}
+.mvp-award-photo{width:100px;height:100px;border-radius:8px;object-fit:cover;flex-shrink:0;border:2px solid #e8c96a;background:#eee;}
 .best9-description{display:flex;align-items:center;justify-content:center;gap:8px;margin:.4rem 0 .8rem;padding:.5rem .8rem;background:linear-gradient(90deg,#f0f4ff,#fff8f0);border-radius:10px;border:1px solid #dde3f5;}
 .best9-desc-item{font-size:12px;color:#1b2a4a;}
 .best9-desc-sep{font-size:14px;font-weight:700;color:#c9a227;}
@@ -2610,11 +2615,21 @@ function renderMvpAwards(){
   const el=document.getElementById('mvpAwardsSection');
   if(!el) return;
   if(!AWARDS_ENABLED || AWARDS.length===0){ el.style.display='none'; el.innerHTML=''; return; }
+  // 賞名／チーム名／選手名を別の行に分けて組み立てる（1文にすると折り返しで見栄えが崩れるため）
+  const buildRow=(a,w)=>{
+    const photoUrl=resolveAwardPhotoUrl(w,w.team,w.player);
+    const photoHtml=photoUrl?`<img src="${esc(photoUrl)}" class="mvp-award-photo" onerror="imgRetry(this)">`:'';
+    return `<div class="mvp-award-row">${photoHtml}<div class="mvp-award-info">
+      <div class="mvp-award-title">${esc(a.icon||'🏆')} ${esc(a.label)}</div>
+      ${w.player?`<div class="mvp-award-name">${esc(w.player)}</div>`:''}
+      <div class="mvp-award-team">${esc(w.team)}</div>
+    </div></div>`;
+  };
   let html='';
   const overallLines=AWARDS.filter(a=>a.scope==='overall').map(a=>{
     const w=(a.winners||{})['overall'];
     if(!w||!w.team) return '';
-    return `<div class="mvp-award-row">${esc(a.icon||'🏆')} <b>${esc(a.label)}</b>：${esc(w.team)}${w.player?'・'+esc(w.player):''}</div>`;
+    return buildRow(a,w);
   }).filter(Boolean);
   if(overallLines.length){
     html+=`<div class="mvp-award-block"><div class="mvp-award-blockname">大会全体</div>${overallLines.join('')}</div>`;
@@ -2623,7 +2638,7 @@ function renderMvpAwards(){
     const lines=AWARDS.filter(a=>a.scope==='block').map(a=>{
       const w=(a.winners||{})[b.id];
       if(!w||!w.team) return '';
-      return `<div class="mvp-award-row">${esc(a.icon||'🏆')} <b>${esc(a.label)}</b>：${esc(w.team)}${w.player?'・'+esc(w.player):''}</div>`;
+      return buildRow(a,w);
     }).filter(Boolean);
     if(lines.length){
       html+=`<div class="mvp-award-block"><div class="mvp-award-blockname">${esc(b.name)}</div>${lines.join('')}</div>`;
@@ -2654,12 +2669,60 @@ function renderAwardWinnerRow(award, key, scopeLabel){
   const teams=getDisplayTeams();
   const teamOpts='<option value="">未選出</option>'+teams.map(t=>`<option value="${esc(t.name)}" ${t.name===curTeam?'selected':''}>${esc(t.name)}</option>`).join('');
   const awardIdEsc=esc(award.id), keyEsc=esc(key);
-  return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
-    <span style="font-size:11px;color:#888;width:70px;flex-shrink:0;">${esc(scopeLabel)}</span>
-    <select id="awdteam_${awardIdEsc}_${keyEsc}" style="flex:1;min-width:100px;font-size:12px;padding:5px;border:1px solid #ddd;border-radius:6px;" onchange="updateAwardPlayerOptions('${awardIdEsc}','${keyEsc}')">${teamOpts}</select>
-    <select id="awdplayer_${awardIdEsc}_${keyEsc}" style="flex:1;min-width:100px;font-size:12px;padding:5px;border:1px solid #ddd;border-radius:6px;">${buildAwardPlayerOptions(curTeam,curPlayer)}</select>
-    <button onclick="saveAwardWinner('${awardIdEsc}','${keyEsc}')" style="font-size:11px;padding:5px 9px;border:none;border-radius:6px;background:#1a3260;color:#fff;cursor:pointer;">保存</button>
+  const photoUrl=resolveAwardPhotoUrl(w,curTeam,curPlayer);
+  const isOverride=!!w.photo_url;
+  return `<div style="border-top:1px dashed #eee;padding-top:8px;margin-top:6px;">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:#888;width:70px;flex-shrink:0;">${esc(scopeLabel)}</span>
+      <select id="awdteam_${awardIdEsc}_${keyEsc}" style="flex:1;min-width:100px;font-size:12px;padding:5px;border:1px solid #ddd;border-radius:6px;" onchange="updateAwardPlayerOptions('${awardIdEsc}','${keyEsc}')">${teamOpts}</select>
+      <select id="awdplayer_${awardIdEsc}_${keyEsc}" style="flex:1;min-width:100px;font-size:12px;padding:5px;border:1px solid #ddd;border-radius:6px;">${buildAwardPlayerOptions(curTeam,curPlayer)}</select>
+      <button onclick="saveAwardWinner('${awardIdEsc}','${keyEsc}')" style="font-size:11px;padding:5px 9px;border:none;border-radius:6px;background:#1a3260;color:#fff;cursor:pointer;">保存</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;padding-left:76px;flex-wrap:wrap;">
+      <div id="awdphoto_preview_${awardIdEsc}_${keyEsc}" style="width:56px;height:56px;border-radius:8px;overflow:hidden;background:#eee;flex-shrink:0;">${photoUrl?`<img src="${esc(photoUrl)}" style="width:100%;height:100%;object-fit:cover;" onerror="imgRetry(this)">`:''}</div>
+      <label style="font-size:11px;color:#1a3260;text-decoration:underline;cursor:pointer;">
+        ${isOverride?'写真を差し替え':'写真をアップロード（未指定なら選手紹介の写真を使用）'}
+        <input type="file" accept="image/*" style="display:none;" onchange="handleAwardPhotoSelect(this,'${awardIdEsc}','${keyEsc}')">
+      </label>
+      ${isOverride?`<button onclick="clearAwardPhoto('${awardIdEsc}','${keyEsc}')" style="font-size:11px;color:#c0392b;background:none;border:none;text-decoration:underline;cursor:pointer;padding:0;">既定の写真に戻す</button>`:''}
+    </div>
   </div>`;
+}
+async function handleAwardPhotoSelect(input, awardId, key){
+  const file=input.files&&input.files[0];
+  if(!file) return;
+  // 先に写真だけ選ばれた場合、保存処理は「未選出」とみなして写真を破棄してしまうため、
+  // チーム未選択のうちは受け付けずに案内する（アップロードした写真が黙って消えるのを防ぐ）
+  const teamSel=document.getElementById(`awdteam_${awardId}_${key}`);
+  if(!teamSel||!teamSel.value){
+    alert('先に受賞チーム（必要なら選手）を選んでください。');
+    input.value='';
+    return;
+  }
+  try{
+    const blob=await openCropModal(file,1); // 正方形に切り取り
+    _pendingAwardPhotoBlobs[awardId+'_'+key]=blob;
+    const preview=document.getElementById(`awdphoto_preview_${awardId}_${key}`);
+    if(preview) preview.innerHTML=`<img src="${URL.createObjectURL(blob)}" style="width:100%;height:100%;object-fit:cover;">`;
+    await saveAwardWinner(awardId,key);
+  }catch(e){
+    if(e&&e.message!=='cropped_cancelled'){ alert('画像の処理に失敗しました'); }
+  }
+  input.value='';
+}
+async function clearAwardPhoto(awardId, key){
+  const award=AWARDS.find(a=>a.id===awardId);
+  if(!award) return;
+  const w=(award.winners||{})[key];
+  const oldUrl=w&&w.photo_url;
+  const newWinners={...(award.winners||{})};
+  if(newWinners[key]){ newWinners[key]={...newWinners[key]}; delete newWinners[key].photo_url; }
+  try{
+    const {error}=await withTimeout(sb.from('awards').update({winners:newWinners}).eq('id',awardId), 8000);
+    if(error){ alert('更新に失敗しました：'+friendlyErrorMessage(error)); return; }
+    if(oldUrl){ deleteStorageFileByUrl(oldUrl).catch(()=>{}); }
+    await loadAwardsFromSupabase();
+  } catch(e){ alert(friendlyErrorMessage(e)); console.error(e); }
 }
 function updateAwardPlayerOptions(awardId, key){
   const teamSel=document.getElementById(`awdteam_${awardId}_${key}`);
@@ -2676,11 +2739,27 @@ async function saveAwardWinner(awardId, key){
   const teamVal=teamSel.value||'';
   const playerVal=(playerSel&&playerSel.value)?playerSel.value:'';
   const newWinners={...(award.winners||{})};
-  if(teamVal){ newWinners[key]={team:teamVal,player:playerVal||null}; }
-  else { delete newWinners[key]; }
+  const pendingBlob=_pendingAwardPhotoBlobs[awardId+'_'+key];
+  let photoPath=(newWinners[key]&&newWinners[key].photo_url)||null;
+  const oldPhotoPath=photoPath;
   try{
+    if(pendingBlob){
+      const filePath='award/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+extFromBlob(pendingBlob);
+      const {error:upErr}=await storageUpload(filePath,pendingBlob);
+      if(upErr){ alert('写真のアップロードに失敗しました：'+friendlyErrorMessage(upErr)); return; }
+      photoPath=filePath;
+      delete _pendingAwardPhotoBlobs[awardId+'_'+key];
+    }
+    if(teamVal){
+      newWinners[key]={team:teamVal,player:playerVal||null};
+      if(photoPath) newWinners[key].photo_url=photoPath;
+    } else {
+      if(photoPath){ deleteStorageFileByUrl(photoPath).catch(()=>{}); }
+      delete newWinners[key];
+    }
     const {error}=await withTimeout(sb.from('awards').update({winners:newWinners}).eq('id',awardId), 8000);
     if(error){ alert('保存に失敗しました：'+friendlyErrorMessage(error)); return; }
+    if(pendingBlob&&oldPhotoPath&&oldPhotoPath!==photoPath){ deleteStorageFileByUrl(oldPhotoPath).catch(()=>{}); }
     await loadAwardsFromSupabase();
   } catch(e){ alert(friendlyErrorMessage(e)); console.error(e); }
 }
@@ -2778,6 +2857,21 @@ const THEME_OVERRIDE_KEY='hk_theme_override_'+siteKey(); // 端末ごとの上�
 let SITE_THEME='classic'; // サイト全体のデフォルト（管理者設定・Supabase保存）
 let AWARDS_ENABLED=false; // 表彰（MVP・敢闘賞など）掲載のON/OFF（商用向け機能スイッチ、管理者設定・Supabase保存）
 let AWARDS=[]; // 表彰の定義＋選出結果（Supabaseのawardsテーブルから読み込む）
+let _pendingAwardPhotoBlobs={}; // 表彰の写真アップロード（差し替え）用の一時Blob保持（キー：awardId_key）
+// 表彰の写真解決：明示的な差し替え写真があればそれを、無ければ選手紹介の写真（個人 or チーム集合写真）をフォールバックで使う
+function resolveAwardPhotoUrl(winner, teamName, playerName){
+  if(winner&&winner.photo_url) return resolveMediaUrl(winner.photo_url);
+  if(!teamName) return null;
+  const team=getDisplayTeams().find(t=>t.name===teamName);
+  if(!team) return null;
+  if(playerName){
+    const player=(team.roster||[]).find(p=>(p.name||(p.num+'番'))===playerName);
+    if(player&&player.photoUrl) return resolveMediaUrl(player.photoUrl);
+    return null;
+  }
+  if(team.teamPhotoUrl) return resolveMediaUrl(team.teamPhotoUrl);
+  return null;
+}
 
 function applyThemeToDOM(themeId){
   if(themeId && themeId!=='classic'){
