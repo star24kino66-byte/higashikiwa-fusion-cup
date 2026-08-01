@@ -787,6 +787,10 @@ img.clickable-photo{cursor:zoom-in;}
 .period-after .period-notice-text b{color:#555;}
 .period-notice-text span{font-size:11px;color:#888;}
 .deadline-notice{font-size:12px;font-weight:700;color:#8a6800;background:#fff8ec;border:1px solid #f5c842;border-radius:8px;padding:.5rem .8rem;margin:0 0 .6rem;text-align:center;}
+.mvp-award-block{background:linear-gradient(90deg,#fff8f0,#f0f4ff);border:1px solid #e8c96a;border-radius:10px;padding:.6rem .9rem;margin:0 0 .6rem;}
+.mvp-award-blockname{font-size:11px;font-weight:700;color:#8a6800;margin-bottom:4px;}
+.mvp-award-row{font-size:13px;color:#1b2a4a;line-height:1.6;}
+.mvp-award-row b{color:#8a6800;}
 .best9-description{display:flex;align-items:center;justify-content:center;gap:8px;margin:.4rem 0 .8rem;padding:.5rem .8rem;background:linear-gradient(90deg,#f0f4ff,#fff8f0);border-radius:10px;border:1px solid #dde3f5;}
 .best9-desc-item{font-size:12px;color:#1b2a4a;}
 .best9-desc-sep{font-size:14px;font-weight:700;color:#c9a227;}
@@ -1215,6 +1219,7 @@ img{
   <div id="latestScoreboard">
     <div style="font-size:12px;color:#aaa;text-align:center;padding:1rem 0;">試合結果はまだ登録されていません</div>
   </div>
+  <div id="mvpAwardsSection" style="display:none;"></div>
   <button class="more-btn" onclick="openModal('games')">すべての試合結果を見る</button>
 </div>
 
@@ -2082,6 +2087,19 @@ img{
       </div>
 
       <div class="admin-form-card">
+        <div class="admin-form-title">🏆 表彰（MVP・敢闘賞など）</div>
+        <p style="font-size:12px;color:#666;margin-bottom:.6rem;">自由に賞を追加し、「ブロック別」（ブロックごとに1名）か「大会全体」（大会を通して1名）かを選んで、チーム→選手をプルダウンで選出できます（試合速報欄の近くに表示）。不要な場合はOFFのままにしてください（初期状態は非表示）。</p>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#333;cursor:pointer;">
+          <input type="checkbox" id="mvpAwardsEnabledToggle" onchange="saveMvpAwardsEnabled(this.checked)">
+          表彰をサイトに掲載する
+        </label>
+        <div id="mvpAwardAdminWrap" style="display:none;margin-top:.8rem;">
+          <button class="ubtn" style="width:auto;padding:8px 14px;font-size:12px;margin-bottom:.8rem;" onclick="addAward()">➕ 賞を追加</button>
+          <div id="mvpAwardAdminList"></div>
+        </div>
+      </div>
+
+      <div class="admin-form-card">
         <div class="admin-form-title">🏆 写真投稿カテゴリ（賞名）の設定</div>
         <p style="font-size:12px;color:#666;margin-bottom:.6rem;">写真投稿フォームやフォトベスト9で表示される賞のアイコン・名前です。件数（6個）と並び順は固定ですが、他クラブで利用する際はここで大会に合わせて変更してください。</p>
         <div id="catAdminList"></div>
@@ -2572,6 +2590,170 @@ async function loadBlocksFromSupabase(){
   renderBlockAdminList();
   renderAllTournamentBlocks();
   populateBlockSelect();
+  renderMvpAwards();
+  renderMvpAwardAdminList();
+}
+
+/* ---------- 表彰（MVP・敢闘賞など、商用向けON/OFF＋自由追加機能） ---------- */
+async function loadAwardsFromSupabase(){
+  const {data,error}=await sb.from('awards').select('*').order('sort_order',{ascending:true});
+  if(error){ console.error('awards読み込みエラー:',error); return; }
+  AWARDS=(data||[]).map(a=>({
+    ...a,
+    winners: (typeof a.winners==='string') ? (JSON.parse(a.winners||'{}')||{}) : (a.winners||{})
+  }));
+  renderMvpAwards();
+  renderMvpAwardAdminList();
+}
+// 公開側：試合速報エリア内の枠に表示（機能OFF、または選出済みの賞が1つも無ければ非表示）
+function renderMvpAwards(){
+  const el=document.getElementById('mvpAwardsSection');
+  if(!el) return;
+  if(!AWARDS_ENABLED || AWARDS.length===0){ el.style.display='none'; el.innerHTML=''; return; }
+  let html='';
+  const overallLines=AWARDS.filter(a=>a.scope==='overall').map(a=>{
+    const w=(a.winners||{})['overall'];
+    if(!w||!w.team) return '';
+    return `<div class="mvp-award-row">${esc(a.icon||'🏆')} <b>${esc(a.label)}</b>：${esc(w.team)}${w.player?'・'+esc(w.player):''}</div>`;
+  }).filter(Boolean);
+  if(overallLines.length){
+    html+=`<div class="mvp-award-block"><div class="mvp-award-blockname">大会全体</div>${overallLines.join('')}</div>`;
+  }
+  (BLOCKS||[]).forEach(b=>{
+    const lines=AWARDS.filter(a=>a.scope==='block').map(a=>{
+      const w=(a.winners||{})[b.id];
+      if(!w||!w.team) return '';
+      return `<div class="mvp-award-row">${esc(a.icon||'🏆')} <b>${esc(a.label)}</b>：${esc(w.team)}${w.player?'・'+esc(w.player):''}</div>`;
+    }).filter(Boolean);
+    if(lines.length){
+      html+=`<div class="mvp-award-block"><div class="mvp-award-blockname">${esc(b.name)}</div>${lines.join('')}</div>`;
+    }
+  });
+  if(!html){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  el.innerHTML=html;
+}
+// チーム選択に応じた選手プルダウンの選択肢HTML
+function buildAwardPlayerOptions(teamName, curPlayer){
+  if(!teamName) return '<option value="">-</option>';
+  const team=getDisplayTeams().find(t=>t.name===teamName);
+  const roster=team?team.roster:[];
+  let opts='<option value="">（個人未指定）</option>';
+  opts+=roster.map(p=>{
+    const val=p.name||(p.num+'番');
+    const label=(p.num?p.num+'番 ':'')+p.name;
+    return `<option value="${esc(val)}" ${val===curPlayer?'selected':''}>${esc(label)}</option>`;
+  }).join('');
+  return opts;
+}
+// 1つの賞×1つの選出枠（ブロック別なら各ブロック、大会全体ならoverall1つ）分のチーム・選手選出行
+function renderAwardWinnerRow(award, key, scopeLabel){
+  const w=(award.winners||{})[key]||{};
+  const curTeam=w.team||'';
+  const curPlayer=w.player||'';
+  const teams=getDisplayTeams();
+  const teamOpts='<option value="">未選出</option>'+teams.map(t=>`<option value="${esc(t.name)}" ${t.name===curTeam?'selected':''}>${esc(t.name)}</option>`).join('');
+  const awardIdEsc=esc(award.id), keyEsc=esc(key);
+  return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+    <span style="font-size:11px;color:#888;width:70px;flex-shrink:0;">${esc(scopeLabel)}</span>
+    <select id="awdteam_${awardIdEsc}_${keyEsc}" style="flex:1;min-width:100px;font-size:12px;padding:5px;border:1px solid #ddd;border-radius:6px;" onchange="updateAwardPlayerOptions('${awardIdEsc}','${keyEsc}')">${teamOpts}</select>
+    <select id="awdplayer_${awardIdEsc}_${keyEsc}" style="flex:1;min-width:100px;font-size:12px;padding:5px;border:1px solid #ddd;border-radius:6px;">${buildAwardPlayerOptions(curTeam,curPlayer)}</select>
+    <button onclick="saveAwardWinner('${awardIdEsc}','${keyEsc}')" style="font-size:11px;padding:5px 9px;border:none;border-radius:6px;background:#1a3260;color:#fff;cursor:pointer;">保存</button>
+  </div>`;
+}
+function updateAwardPlayerOptions(awardId, key){
+  const teamSel=document.getElementById(`awdteam_${awardId}_${key}`);
+  const playerSel=document.getElementById(`awdplayer_${awardId}_${key}`);
+  if(!teamSel||!playerSel) return;
+  playerSel.innerHTML=buildAwardPlayerOptions(teamSel.value,'');
+}
+async function saveAwardWinner(awardId, key){
+  const award=AWARDS.find(a=>a.id===awardId);
+  if(!award) return;
+  const teamSel=document.getElementById(`awdteam_${awardId}_${key}`);
+  const playerSel=document.getElementById(`awdplayer_${awardId}_${key}`);
+  if(!teamSel) return;
+  const teamVal=teamSel.value||'';
+  const playerVal=(playerSel&&playerSel.value)?playerSel.value:'';
+  const newWinners={...(award.winners||{})};
+  if(teamVal){ newWinners[key]={team:teamVal,player:playerVal||null}; }
+  else { delete newWinners[key]; }
+  try{
+    const {error}=await withTimeout(sb.from('awards').update({winners:newWinners}).eq('id',awardId), 8000);
+    if(error){ alert('保存に失敗しました：'+friendlyErrorMessage(error)); return; }
+    await loadAwardsFromSupabase();
+  } catch(e){ alert(friendlyErrorMessage(e)); console.error(e); }
+}
+async function updateAwardMeta(awardId, field, value){
+  try{
+    const patch={}; patch[field]=value;
+    const {error}=await withTimeout(sb.from('awards').update(patch).eq('id',awardId), 8000);
+    if(error){ alert('保存に失敗しました：'+friendlyErrorMessage(error)); return; }
+    await loadAwardsFromSupabase();
+  } catch(e){ alert(friendlyErrorMessage(e)); console.error(e); }
+}
+async function addAward(){
+  const label=prompt('賞の名前を入力してください（例：MVP、打撃賞、盗塁王など）','');
+  if(label===null) return;
+  const trimmed=label.trim();
+  if(!trimmed){ alert('賞の名前を入力してください。'); return; }
+  const id='award_'+Date.now();
+  try{
+    const {error}=await withTimeout(sb.from('awards').insert({id,label:trimmed,icon:'🏆',scope:'block',winners:{},sort_order:AWARDS.length}), 8000);
+    if(error){ alert('追加に失敗しました：'+friendlyErrorMessage(error)); return; }
+    await loadAwardsFromSupabase();
+  } catch(e){ alert(friendlyErrorMessage(e)); console.error(e); }
+}
+async function deleteAward(awardId){
+  if(!confirm('この賞を削除します。選出済みの内容も消えます。よろしいですか？')) return;
+  try{
+    const {error}=await withTimeout(sb.from('awards').delete().eq('id',awardId), 8000);
+    if(error){ alert('削除に失敗しました：'+friendlyErrorMessage(error)); return; }
+    await loadAwardsFromSupabase();
+  } catch(e){ alert(friendlyErrorMessage(e)); console.error(e); }
+}
+// 管理画面：大会設定タブ内の表彰リスト（機能OFFなら非表示）
+function renderMvpAwardAdminList(){
+  const toggle=document.getElementById('mvpAwardsEnabledToggle');
+  if(toggle) toggle.checked=AWARDS_ENABLED;
+  const wrap=document.getElementById('mvpAwardAdminWrap');
+  if(!wrap) return;
+  if(!AWARDS_ENABLED){ wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  const listEl=document.getElementById('mvpAwardAdminList');
+  if(!listEl) return;
+  if(AWARDS.length===0){
+    listEl.innerHTML='<div style="font-size:12px;color:#aaa;padding:.5rem 0;">まだ賞がありません。「➕ 賞を追加」から作成してください。</div>';
+    return;
+  }
+  listEl.innerHTML=AWARDS.map(a=>{
+    const winnerRows = a.scope==='overall'
+      ? renderAwardWinnerRow(a,'overall','大会全体')
+      : ((BLOCKS||[]).length>0
+          ? BLOCKS.map(b=>renderAwardWinnerRow(a,b.id,b.name)).join('')
+          : '<div style="font-size:11px;color:#aaa;">先に「🏆 トーナメント・リーグ戦設定」でブロックを作成してください</div>');
+    return `<div style="border:1px solid #e0e2ea;border-radius:10px;padding:10px 12px;margin-bottom:10px;">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <input type="text" value="${esc(a.icon||'🏆')}" maxlength="4" style="width:44px;font-size:14px;padding:5px;border:1px solid #ddd;border-radius:6px;text-align:center;" onchange="updateAwardMeta('${esc(a.id)}','icon',this.value)">
+        <input type="text" value="${esc(a.label)}" maxlength="20" placeholder="賞の名前（例：MVP）" style="flex:1;min-width:100px;font-size:13px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-weight:700;" onchange="updateAwardMeta('${esc(a.id)}','label',this.value)">
+        <select style="font-size:12px;padding:5px;border:1px solid #ddd;border-radius:6px;" onchange="updateAwardMeta('${esc(a.id)}','scope',this.value)">
+          <option value="block" ${a.scope==='block'?'selected':''}>ブロック別</option>
+          <option value="overall" ${a.scope==='overall'?'selected':''}>大会全体</option>
+        </select>
+        <button onclick="deleteAward('${esc(a.id)}')" style="font-size:11px;padding:5px 9px;border:none;border-radius:6px;background:#c0392b;color:#fff;cursor:pointer;">削除</button>
+      </div>
+      ${winnerRows}
+    </div>`;
+  }).join('');
+}
+async function saveMvpAwardsEnabled(checked){
+  AWARDS_ENABLED=checked;
+  try{
+    const {error}=await sb.from('settings').upsert({key:'awards_enabled',value:checked?'true':'false'},{onConflict:'key'});
+    if(error){ console.error('awards_enabled保存エラー:',error); }
+  } catch(e){ console.error(e); }
+  renderMvpAwardAdminList();
+  renderMvpAwards();
 }
 
 /* =========================================================
@@ -2594,6 +2776,8 @@ const THEME_LIST=[
 ];
 const THEME_OVERRIDE_KEY='hk_theme_override_'+siteKey(); // 端末ごとの上書き（localStorage・パスワード不要）
 let SITE_THEME='classic'; // サイト全体のデフォルト（管理者設定・Supabase保存）
+let AWARDS_ENABLED=false; // 表彰（MVP・敢闘賞など）掲載のON/OFF（商用向け機能スイッチ、管理者設定・Supabase保存）
+let AWARDS=[]; // 表彰の定義＋選出結果（Supabaseのawardsテーブルから読み込む）
 
 function applyThemeToDOM(themeId){
   if(themeId && themeId!=='classic'){
@@ -6040,6 +6224,7 @@ function renderAlbumAdmin(){
     loadDonorsFromSupabase(),
     loadPhotosFromSupabase(),
     loadAlbumFromSupabase(),
+    loadAwardsFromSupabase(),
   ]);
   mergeApproved();
   rp(ct);
@@ -6056,6 +6241,11 @@ function renderAlbumAdmin(){
   updateDashboard();
   // 選手名簿（自チーム＋対戦チーム）の各種フォーム・タブを初期描画（選手宛メッセージ反映）
   renderAllTeamViews();
+  // 表彰：AWARDS/BLOCKS/TEAMS_ROSTERは並列読み込みのため、どれが最後に完了しても
+  // 3つ揃った状態で必ず1回描画されるよう、全読み込み完了後にここで明示的に描画する。
+  // （teamsの完了時には描画関数を呼んでいないため、これが無いと選手写真・チーム一覧が欠ける）
+  renderMvpAwards();
+  renderMvpAwardAdminList();
   // 大会要綱の初期描画
   renderTournamentInfo(getDisplayTournamentInfo());
   renderInfoImages();
@@ -6115,6 +6305,10 @@ function renderAlbumAdmin(){
   const _scheduleBlocksSync=_makeBurstSync(async()=>{
     await loadBlocksFromSupabase();
   });
+  // 表彰（awards）：他端末でのMVP・敢闘賞等の追加・編集・選出を反映
+  const _scheduleAwardsSync=_makeBurstSync(async()=>{
+    await loadAwardsFromSupabase();
+  });
   // settings（テーマ・大会要綱・選手名簿・期間設定など多岐にわたる共有設定）
   // 【2026/7/17 修正】以前は各描画を素直に順番に呼んでいたため、途中の1つが例外を投げると
   // それ以降（特に「名簿承認待ち」バッジの更新）が実行されないまま止まっていた。
@@ -6139,6 +6333,9 @@ function renderAlbumAdmin(){
   const _scheduleTeamsSync=_makeBurstSync(async()=>{
     await loadTeamsFromSupabase();
     _safeRender('チーム関連表示', ()=>renderAllTeamViews());
+    // 表彰の表示はチーム名簿（選手写真・チーム一覧）に依存するため、名簿更新時にも描画し直す
+    _safeRender('表彰表示', ()=>renderMvpAwards());
+    _safeRender('表彰管理', ()=>renderMvpAwardAdminList());
   });
   // roster_submissions（選手名簿の提出・承認待ち一覧）
   const _scheduleRosterSubmissionsSync=_makeBurstSync(async()=>{
@@ -6188,6 +6385,7 @@ function renderAlbumAdmin(){
       .on('postgres_changes',{event:'*',schema:'public',table:'donors'}, _scheduleDonorsSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'games'}, _scheduleGamesSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'tournament_blocks'}, _scheduleBlocksSync)
+      .on('postgres_changes',{event:'*',schema:'public',table:'awards'}, _scheduleAwardsSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'teams'}, _scheduleTeamsSync)
       .on('postgres_changes',{event:'*',schema:'public',table:'roster_submissions'}, payload=>{
         _scheduleRosterSubmissionsSync();
@@ -6209,7 +6407,7 @@ function renderAlbumAdmin(){
   // フォールバック：Realtimeが繋がっていない場合は10秒ポーリング
   setInterval(async()=>{
     if(_realtimeOk) return;
-    await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase(), loadTeamsFromSupabase(), loadRosterSubmissionsFromSupabase()]);
+    await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase(), loadTeamsFromSupabase(), loadRosterSubmissionsFromSupabase(), loadAwardsFromSupabase()]);
     checkPeriods();
     _refreshPublic(); _refreshAdmin();
     renderAllTeamViews();
@@ -6235,7 +6433,7 @@ function renderAlbumAdmin(){
   // その場で最新データを取り直す。管理画面を開いている場合は管理側の表示も更新する。
   async function forceRefreshAll(reason){
     try{
-      await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase(), loadTeamsFromSupabase(), loadRosterSubmissionsFromSupabase()]);
+      await Promise.all([loadCheersFromSupabase(), loadPhotosFromSupabase(), loadDonorsFromSupabase(), loadGamesFromSupabase(), loadBlocksFromSupabase(), loadSettingsFromSupabase(), loadTeamsFromSupabase(), loadRosterSubmissionsFromSupabase(), loadAwardsFromSupabase()]);
       checkPeriods();
       _refreshPublic();
       renderAllTeamViews();
@@ -6263,6 +6461,7 @@ const RESET_LABELS={
 const RESET_DETAILS={
   games:'・試合結果データ（gamesテーブル）をすべて削除します。',
   players:'・選手名簿データ（teamsテーブル：選手名・学年・背番号・ポジション・将来の夢・写真URLなど）をすべて削除します。'
+    +'<br>・表彰（MVP・敢闘賞など）の選出結果もあわせて白紙に戻します（賞の名前・範囲の設定は残ります）。'
     +'<br>⚠️写真ファイル自体はR2ストレージに残りますが、紐付け情報が消えるため実質探し出せなくなります。事前にバックアップを推奨します。',
   info:'・大会設定を初期値に戻し、大会情報ページの掲載画像リストをクリアします。'
     +'<br>⚠️画像ファイル自体はR2ストレージに残りますが、紐付けが切れます。',
@@ -6320,6 +6519,16 @@ async function execReset(target){
       case 'players':
         await sb.from('teams').delete().neq('id','00000000-0000-0000-0000-000000000000');
         TEAMS_ROSTER=[];
+        // 表彰の選出結果はチーム・選手に紐づくため、選手データを消したら選出も白紙に戻す。
+        // （賞の名前・アイコン・範囲の定義自体は残す＝次の大会でもそのまま使い回せるようにする）
+        // 賞用に個別アップロードした写真は、ここで実体も削除して孤児ファイルを残さない。
+        {
+          const oldAwardPhotos=[];
+          AWARDS.forEach(a=>Object.values(a.winners||{}).forEach(w=>{ if(w&&w.photo_url) oldAwardPhotos.push(w.photo_url); }));
+          await sb.from('awards').update({winners:{}}).neq('id','__dummy__');
+          oldAwardPhotos.forEach(u=>deleteStorageFileByUrl(u).catch(()=>{}));
+          await loadAwardsFromSupabase();
+        }
         renderAllTeamViews();
         break;
       case 'info':
@@ -6505,6 +6714,9 @@ async function loadSettingsFromSupabase(){
     if(row.key==='site_theme' && row.value){
       SITE_THEME=row.value;
     }
+    if(row.key==='awards_enabled'){
+      AWARDS_ENABLED=row.value==='true';
+    }
     if(row.key==='photo_categories'){
       try{
         const saved=JSON.parse(row.value);
@@ -6528,6 +6740,8 @@ async function loadSettingsFromSupabase(){
   buildThemePicker();
   if(!getLocalThemeOverride()) applyThemeToDOM(SITE_THEME);
   refreshThemeUI();
+  renderMvpAwards();
+  renderMvpAwardAdminList();
 }
 
 function isInPeriod(type){
