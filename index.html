@@ -1831,6 +1831,7 @@ img{
             <option value="">対戦カードを選択</option>
           </select>
         </div>
+        <div id="gMatchDupNotice" style="display:none;font-size:12px;line-height:1.5;color:#8a4b00;background:#fff6e5;border:1px solid #f0b34a;border-radius:8px;padding:.6rem .8rem;margin-bottom:.5rem;"></div>
         <div class="admin-form-row" id="firstBatRow" style="display:none;">
           <div style="font-size:12px;color:#555;padding:6px 0;flex:1;">先攻：</div>
           <select id="gFirstBat" style="flex:2;font-size:13px;padding:8px;border:1px solid #ddd;border-radius:8px;">
@@ -8163,6 +8164,8 @@ function setGameFormMode(mode, g=null){
     renderInningInputs(6,[],[]);
     document.getElementById('gDate').value='';
     _editingGameId=null;
+    const dupEl=document.getElementById('gMatchDupNotice');
+    if(dupEl){ dupEl.style.display='none'; dupEl.textContent=''; }
   }
 }
 
@@ -8189,6 +8192,11 @@ async function addGame(){
   let dateLabel=dateRaw;
   if(dateRaw){ const d=new Date(dateRaw); dateLabel=d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日'; }
   const matchId=matchVal?matchVal.split('__')[2]||null:null;
+  // 対戦カード未選択のまま保存すると、トーナメント表への勝ち上がりが自動反映されない。
+  // 気づきにくい不具合になるため、保存前に必ず確認する。
+  if(blockId && !matchId){
+    if(!confirm('対戦カードが選択されていません。\n\nこのまま保存すると、勝ったチームがトーナメント表に自動で上がりません（表は手動で直す必要があります）。\n\nこのまま保存しますか？')) return;
+  }
   const record={
     id: _editingGameId || ('g_'+Date.now()+'_'+Math.random().toString(36).slice(2,6)),
     round, date:dateLabel, team_a:teamA, team_b:teamB,
@@ -8779,6 +8787,8 @@ function onMatchChange(){
   const blockId=document.getElementById('gBlock').value;
   const matchVal=document.getElementById('gMatch').value;
   const firstBatRow=document.getElementById('firstBatRow');
+  const dupEl=document.getElementById('gMatchDupNotice');
+  if(dupEl){ dupEl.style.display='none'; dupEl.textContent=''; }
   if(!blockId||!matchVal){firstBatRow.style.display='none';return;}
   const [round,matchIdx]=matchVal.split('__');
   const block=BLOCKS.find(b=>b.id===blockId);
@@ -8796,6 +8806,17 @@ function onMatchChange(){
     `<option value="A">${m.top||'チームA（上）'}（先攻）</option>`+
     `<option value="B">${m.bottom||'チームB（下）'}（先攻）</option>`;
   firstBatRow.style.display='flex';
+  // 選択した対戦カードに既に結果が登録されている場合、その場で気づけるよう案内する。
+  // （別の試合の枠を誤って選ぶと、勝ち上がりが上書きされて表が壊れるため）
+  if(dupEl && !_editingGameId){
+    const existing=GAMES.find(g=>g.block_id===blockId && g.match_id===m.id);
+    if(existing){
+      const statusLabel=existing.status==='done'?'試合終了':'速報中';
+      dupEl.innerHTML=`⚠️ この対戦カードには既に結果が登録されています（${esc(existing.team_a)} vs ${esc(existing.team_b)}／${statusLabel}）。`
+        +`<br>別の試合を登録したい場合は、対戦カードを選び直してください。この試合を直したい場合は、下の試合結果一覧から「編集」を選んでください。`;
+      dupEl.style.display='block';
+    }
+  }
 }
 
 function renderAllTournamentBlocks(){
